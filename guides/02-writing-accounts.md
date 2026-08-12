@@ -137,3 +137,17 @@ Two gotchas when building transactions by hand:
 - **The canonical signature hash elides empty-`msg` signature bytes**, so for those entries
   the hash is the same before and after you fill in the signature. Entries with an explicit
   32-byte `msg` *do* commit to their bytes, so compute the hash last.
+
+## Reproducible bytecode
+
+The examples compile with `--no-cbor-metadata`. Without it solc appends a CBOR blob encoding
+the compiler build, so the bytecode changes whenever the compiler is rebuilt — which makes
+any hex string quoted in documentation go stale immediately. Stripping it makes the output
+deterministic and lets the examples pin exact bytes:
+
+```bash
+solc --experimental --evm-version @future --bin-runtime --optimize --no-cbor-metadata Account.sol
+```
+
+For deployment you generally *want* the metadata; it is only omitted here so the documented
+bytecode stays verifiable.
