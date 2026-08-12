@@ -45,7 +45,7 @@ These are deliberate. See [`guides/03-limitations.md`](guides/03-limitations.md)
 | Divergence | Why |
 |---|---|
 | The `APPROVE` opcode is spelled `approvetx` in Solidity/Yul | `approve` is the ERC-20 method name; reserving it would break a large share of existing contracts. The opcode byte `0xaa` is unchanged. |
-| `SIGPARAM`'s 5-operand copy form is not a named builtin | Its stack effect depends on an operand value, which solc's fixed-arity instruction model cannot express. Reachable via `verbatim_5i_0o(hex"b4", ...)`. |
+| `SIGPARAM`'s 5-operand copy form is not a named builtin | Its stack arity depends on a runtime operand value, which no fixed-arity instruction model can express — see [the upstream note](guides/03-limitations.md#why-this-is-worth-raising-upstream). Reachable via `verbatim_5i_0o(hex"b4", ...)`. |
 | Calldata priced per EIP-7623 (4/16), not EIP-7976 (64/64) | The EIP specifies 7623. The geth branch is otherwise post-Amsterdam, so frame transactions and other transactions in the same block price calldata differently. |
 | Modelled as a standalone `frameTime` fork | EIP-8141 is not assigned to a named fork upstream. |
 | No transaction pool, RPC or networking | Only the execution layer is implemented. Frame transactions can be executed and inspected, not submitted to a node. |

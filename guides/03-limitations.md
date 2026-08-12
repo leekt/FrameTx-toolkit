@@ -41,8 +41,38 @@ return 1, while param `0x04` takes 5 and returns none. Solidity's `InstructionIn
 fixed-arity and cannot express that, so only the metadata form is a builtin. The copy form
 is reachable via `verbatim_5i_0o(hex"b4", ...)` in standalone Yul.
 
-This is worth raising with the EIP authors: no other EVM opcode varies its stack effect by
-operand value, and it will be awkward for every fixed-arity toolchain, not just solc.
+### Why this is worth raising upstream
+
+`SIGPARAM` appears to be the first EVM instruction whose **stack arity depends on a runtime
+operand value**. Ethereum has consistently gone the other way, at real cost:
+
+- `LOG0`–`LOG4` is the identical problem — an operation with a variable number of stack
+  items — solved with **five separate opcodes** (arity 2, 3, 4, 5, 6) rather than one `LOG`
+  taking a topic count.
+- `PUSH1`–`PUSH32`, `DUP1`–`DUP16`, `SWAP1`–`SWAP16` spend ~130 opcodes encoding arity into
+  the opcode byte instead of accepting it as an operand.
+- EOF does have variable-shape instructions, but keeps them statically analyzable: `DUPN` /
+  `SWAPN` / `EXCHANGE` read an **immediate from the bytecode**, and `CALLF` / `RETF` derive
+  arity from the type section. Never from a stack value.
+
+Both mature implementations encode this assumption structurally: solc's `InstructionInfo` has
+`int args; int ret;` and geth's `operation` has `minStack int; maxStack int;`. Neither schema
+can represent a variable-arity opcode, and both have covered every opcode across every fork.
+
+EIP-8141 also breaks its **own** convention here: it allocates two separate opcodes for frame
+data (`FRAMEDATALOAD` `0xb1`, `FRAMEDATACOPY` `0xb2`, mirroring `CALLDATALOAD` /
+`CALLDATACOPY`) but overloads a single opcode for signature data. `0xb5` onward is
+unallocated, so there is no opcode-space pressure justifying the difference.
+
+**Suggested fix:** split the copy form into its own opcode, e.g. `SIGDATACOPY` at `0xb5` with
+fixed arity 4 (`memOffset, dataOffset, length, signatureIndex`) — exactly parallel to
+`FRAMEDATACOPY`. This costs one opcode from an unallocated range and makes the instruction
+set uniform and representable in every fixed-arity toolchain.
+
+The cost of not doing so is not hypothetical: it produced two defects in this toolkit. solc
+can only expose one of the two forms as a builtin, and geth's interpreter needed an explicit
+stack-depth guard where `minStack` could only promise two operands — without it, three bytes
+of bytecode panicked the node.
 
 ### Calldata pricing follows EIP-7623, not EIP-7976
 
