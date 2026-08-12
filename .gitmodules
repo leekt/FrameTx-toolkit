@@ -1,0 +1,8 @@
+[submodule "go-ethereum"]
+	path = go-ethereum
+	url = https://github.com/leekt/go-ethereum.git
+	branch = fix/eip8141-frame-tx
+[submodule "solidity"]
+	path = solidity
+	url = https://github.com/leekt/solidity.git
+	branch = feat/eip8141-frame-opcodes
