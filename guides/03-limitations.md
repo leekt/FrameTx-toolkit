@@ -74,6 +74,35 @@ can only expose one of the two forms as a builtin, and geth's interpreter needed
 stack-depth guard where `minStack` could only promise two operands — without it, three bytes
 of bytecode panicked the node.
 
+**Forward compatibility with EOF is the strongest form of this argument.** The EVM tolerates
+a runtime-determined arity today only because it has no bytecode validation: stack underflow
+is a runtime halt, which is why a hand-written depth check can paper over it. EOF reverses
+that — [EIP-5450](https://eips.ethereum.org/EIPS/eip-5450) requires the stack height at every
+instruction to be **statically determinable at validation time** so underflowing code can be
+rejected before execution. An instruction whose arity depends on a stack value is not
+expressible under that rule. As specified, `SIGPARAM` could not appear in validated EOF code
+without either excluding it or weakening EOF validation.
+
+**Prior art, for whoever picks this up.** Instructions with variable arity are common, but in
+every statically-verified VM the count comes from an *immediate in the instruction stream*,
+never from a runtime stack value: JVM `invokevirtual` (constant-pool descriptor) and
+`multianewarray`; CPython `CALL_FUNCTION(argc)`, `BUILD_TUPLE(n)`, `UNPACK_SEQUENCE(n)`; Wasm
+`call_indirect`; CIL `call`. Even EOF's own `DUPN`/`SWAPN`/`EXCHANGE` take immediates. Where
+the count is genuinely dynamic, these VMs *box* it — CPython's `CALL_FUNCTION_EX` takes a
+fixed number of stack items with the arguments packed into one tuple.
+
+Taking the count off the stack is essentially confined to VMs without static verification:
+Forth (`n ROLL`, `n PICK`, `EXECUTE`, where stack-effect comments are only comments) and the
+Lua VM (`OP_CALL`/`OP_RETURN` with `B=0` meaning "to the runtime stack top", part of why
+untrusted Lua bytecode is unsafe to load).
+
+The precedent that should carry the most weight is Bitcoin Script's `OP_CHECKMULTISIG`, which
+had precisely this shape — pop `n`, then `n` pubkeys, then `m`, then `m` signatures. It is
+regarded as one of Script's worst corners, and Tapscript
+([BIP-342](https://github.com/bitcoin/bips/blob/master/bip-0342.mediawiki)) **disabled it** in
+favour of the fixed-arity `OP_CHECKSIGADD`. The one major chain that shipped a
+stack-determined-arity opcode later removed it.
+
 ### Calldata pricing follows EIP-7623, not EIP-7976
 
 EIP-8141 specifies EIP-7623 pricing (`STANDARD_TOKEN_COST` 4, floor 10). The geth branch is
