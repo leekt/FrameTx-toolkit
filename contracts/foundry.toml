@@ -12,6 +12,10 @@ solc = "0.8.30"
 optimizer = true
 optimizer_runs = 200
 
+# Frame-glue accounts are compiled outside Foundry by
+# script/build-frame-accounts.sh; tests read their runtime bytecode from here.
+fs_permissions = [{ access = "read", path = "./out-frame" }]
+
 [fmt]
 line_length = 100
 tab_width = 4
