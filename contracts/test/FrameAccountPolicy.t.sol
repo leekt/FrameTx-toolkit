@@ -97,9 +97,7 @@ contract FrameAccountPolicyTest is Test {
     }
 
     function test_sessionKeyHappyPath() public pure {
-        assertTrue(
-            FrameAccountPolicy.sessionKeyAllowsCall(_key(1000, false), 999, C, 0, _addrs(C))
-        );
+        assertTrue(FrameAccountPolicy.sessionKeyAllowsCall(_key(1000, false), 999, C, 0, _addrs(C)));
     }
 
     /// An unregistered key has validUntil == 0 and must be rejected even when the

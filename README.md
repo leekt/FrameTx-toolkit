@@ -74,10 +74,11 @@ that is the ERC-20 method name and appears in a large share of deployed Solidity
 it as a compiler builtin would break existing contracts. The opcode byte `0xaa` is
 unchanged. `approve` stays free for your own code.
 
-**You cannot submit a frame transaction to a node yet.** The transaction pool, RPC and
-networking layers are not implemented — only the execution layer. Contracts are exercised
-through the Go test harness in `go-ethereum/core/eip8141_test.go`. See
-[limitations](guides/03-limitations.md).
+**You cannot submit a frame transaction to a node yet.** The transaction pool now accepts
+self-relay frame transactions under the spec's structural prefix rules, but there is no RPC
+or networking layer to get one into the pool from outside, no prefix simulation, and
+paymaster prefixes are rejected. Contracts are exercised through the Go test harness in
+`go-ethereum/core/eip8141_test.go`. See [limitations](guides/03-limitations.md).
 
 ## When the spec changes
 

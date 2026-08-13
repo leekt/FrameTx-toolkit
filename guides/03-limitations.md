@@ -5,22 +5,20 @@ can attempt.
 
 ## The big one: no devnet path
 
-**A frame transaction cannot be submitted to a running node.** Only the execution layer is
-implemented. Frame transactions can be *executed and inspected* through the Go test harness;
-they cannot be gossiped, pooled, or sent over RPC.
+**A frame transaction still cannot be submitted to a running node**, though the pool now
+accepts them internally. Frame transactions can be *executed and inspected* through the Go
+test harness; they cannot yet be gossiped or sent over RPC.
 
-| Missing | Consequence | Where it would go |
+| Status | Component | Detail |
 |---|---|---|
-| Transaction pool | Cannot submit a frame transaction at all | `core/txpool/` — the EIP's entire Mempool section, including `MAX_VERIFY_GAS` and the four recognised validation prefixes. `params.FrameTxMaxVerifyGas` and `FrameTxMaxNonCanonicalPM` are defined but unused |
-| JSON-RPC | Cannot send or read one over RPC | `internal/ethapi/` |
-| Networking | No gossip, no blob sidecar wrapper | `eth/protocols/eth/` |
+| Partial | Transaction pool | `core/txpool/frame_validation.go` implements the spec's structural rules: validation-prefix shape matching, `MAX_VERIFY_GAS` (counting signature verification), no atomic batch in the prefix, no VERIFY frame after it. A self-relay transaction reaches the pending queue. |
+| Missing | Prefix simulation | The spec also requires simulating the prefix and rejecting banned opcodes, storage reads outside `tx.sender`, state writes and calls to non-existent contracts. Without it, an accepted transaction can still be invalidated by third-party state changes — the DoS vector the trace rules exist to close. |
+| Missing | Paymaster support | The `[only_verify, pay]` prefix is recognised but rejected (`ErrFramePaymaster`). Admitting it safely needs per-payer reservation accounting plus canonical-paymaster code matching, neither of which exists. |
+| Missing | JSON-RPC | `internal/ethapi/` — no way to send or read one over RPC. |
+| Missing | Networking | `eth/protocols/eth/` — no gossip, no blob sidecar wrapper. |
 
-The txpool is the highest-value next step: with it plus a thin RPC path, contracts become
-testable against a real node.
-
-The mempool rules are also the largest single chunk of unimplemented spec, and they are not
-cosmetic — they are the DoS defence for validation frames. Anything you build here should be
-assumed to face additional constraints once they land.
+RPC is the cheapest remaining step to an end-to-end demo. Prefix simulation is the largest,
+and paymaster support depends on it.
 
 ## Deliberate divergences
 
