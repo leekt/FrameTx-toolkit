@@ -7,16 +7,28 @@ import {FrameTest, IFrameVm} from "./FrameTest.sol";
 contract OwnerAccountTest is FrameTest {
     address constant ACCOUNT = address(0xACC0);
     address constant OWNER = address(0x0BEEF);
+    address constant STRANGER = address(0xBAD);
 
     function setUp() public {
         deployAccount("OwnerAccount", ACCOUNT);
         vm.store(ACCOUNT, bytes32(0), bytes32(uint256(uint160(OWNER))));
     }
 
-    function test_ownerApproves() public {
-        IFrameVm.FrameTx memory ctx = verifyContext(ACCOUNT, SCOPE_BOTH, bytes32(0));
+    /// The frame data must carry `validate()`. OwnerAccount has a `receive()`, so an
+    /// empty-calldata call succeeds whoever signed, and every assertion built on one
+    /// is vacuous -- hence `assertApprovesFrame` rather than `assertApproves`.
+    function _ctx(address signer) internal pure returns (IFrameVm.FrameTx memory ctx) {
+        ctx = verifyContext(ACCOUNT, SCOPE_BOTH, bytes32(0));
+        ctx.frames[0].data = abi.encodeWithSignature("validate()");
         ctx.signatures = new IFrameVm.FrameTxSignature[](1);
-        ctx.signatures[0] = secpSig(OWNER);
-        assertApproves(ACCOUNT, ctx, "owner should approve");
+        ctx.signatures[0] = secpSig(signer);
+    }
+
+    function test_ownerApproves() public {
+        assertApprovesFrame(ACCOUNT, _ctx(OWNER), "owner should approve");
+    }
+
+    function test_strangerRefused() public {
+        assertRefusesFrame(ACCOUNT, _ctx(STRANGER), "stranger must not approve");
     }
 }
