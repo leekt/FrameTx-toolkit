@@ -43,6 +43,7 @@ That compiles to about 20 bytes of validation logic.
 | [`solidity/`](https://github.com/leekt/solidity/tree/feat/eip8141-frame-opcodes) | Submodule — compiles the six new opcodes |
 | [`spec/EIP8141.md`](spec/EIP8141.md) | The pinned spec text, vendored |
 | [`examples/`](examples/) | Worked accounts and a paymaster |
+| [`contracts/`](contracts/) | Foundry project — tested policy layer, plus a build script for the frame glue |
 | [`guides/`](guides/) | Build, write, and what does not work yet |
 | [`tools/check-spec-drift.sh`](tools/check-spec-drift.sh) | Detect whether the spec moved |
 

@@ -1,0 +1,17 @@
+# The policy layer compiles and tests with stock solc: it contains no EIP-8141
+# opcodes, so Foundry's EVM can execute it. The frame glue that does use the new
+# opcodes lives in ../examples and is built by script/build-frame-accounts.sh,
+# because Foundry cannot compile it (evm_version "@future" is not in its enum)
+# and could not execute it if it could (revm has no 0xaa/0xb0-0xb4).
+[profile.default]
+src = "src"
+test = "test"
+out = "out"
+libs = ["lib"]
+solc = "0.8.30"
+optimizer = true
+optimizer_runs = 200
+
+[fmt]
+line_length = 100
+tab_width = 4
