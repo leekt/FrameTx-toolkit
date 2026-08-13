@@ -9,6 +9,8 @@ baseline instead of guessed at.
 | **EIP-8141 spec** | `064f49621d05ce25323def867a6a2ed9275d3570` | 2026-08-11 | [ethereum/EIPs](https://github.com/ethereum/EIPs) — `EIPS/eip-8141.md` |
 | **go-ethereum** | `81d88d96ae33571f57558eee9bba35062ac7d867` | 2026-08-13 | [leekt/go-ethereum](https://github.com/leekt/go-ethereum) — branch `fix/eip8141-frame-tx` |
 | **solidity** | `9daabdb8d7b85777dac402796e3149d50a06be7c` | 2026-08-12 | [leekt/solidity](https://github.com/leekt/solidity) — branch `feat/eip8141-frame-opcodes` |
+| **revm** | `e8b061b6e506428b51870c3314ed2cbc08a161fc` | 2026-08-13 | [leekt/revm](https://github.com/leekt/revm) — branch `feat/eip8141-frame-opcodes` |
+| **foundry** | `1953409` on `feat/eip8141-frame-opcodes` | 2026-08-13 | [leekt/foundry](https://github.com/leekt/foundry) — patches all revm crates to the fork |
 
 The spec text as of that commit is vendored at [`spec/EIP8141.md`](spec/EIP8141.md),
 so the toolkit is self-contained and the diff is always available locally.
@@ -29,7 +31,7 @@ Ordered by how likely a spec revision is to invalidate it.
 
 | Spec area | If it changes, revisit |
 |---|---|
-| Opcode numbers or stack layouts | `solidity/libevmasm/Instruction.{h,cpp}`, `go-ethereum/core/vm/frame_ops.go`, every example |
+| Opcode numbers or stack layouts | `solidity/libevmasm/Instruction.{h,cpp}`, `go-ethereum/core/vm/frame_ops.go`, `revm/crates/bytecode/src/opcode.rs` + `revm/crates/interpreter/src/instructions/frame_tx.rs`, every example |
 | `APPROVE` scope semantics | `go-ethereum/core/vm/frame_ops.go` (`FrameContext.Approve`), examples 03–06 |
 | Default code behaviour | `go-ethereum/core/state_transition.go` (`runDefaultVerifyCode`), example 01 |
 | Gas constants / formulas | `go-ethereum/params/protocol_params.go`, `core/types/tx_frame.go` (`GasLimits`) |

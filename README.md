@@ -41,6 +41,7 @@ That compiles to about 20 bytes of validation logic.
 |---|---|
 | [`go-ethereum/`](https://github.com/leekt/go-ethereum/tree/fix/eip8141-frame-tx) | Submodule — executes frame transactions |
 | [`solidity/`](https://github.com/leekt/solidity/tree/feat/eip8141-frame-opcodes) | Submodule — compiles the six new opcodes |
+| [`revm/`](https://github.com/leekt/revm/tree/feat/eip8141-frame-opcodes) | Submodule — executes the six new opcodes, for Foundry |
 | [`spec/EIP8141.md`](spec/EIP8141.md) | The pinned spec text, vendored |
 | [`examples/`](examples/) | Worked accounts and a paymaster |
 | [`contracts/`](contracts/) | Foundry project — tested policy layer, plus a build script for the frame glue |
@@ -55,6 +56,8 @@ That compiles to about 20 bytes of validation logic.
    tables, the `APPROVE` scope rules, and the constraints that will bite you.
 3. **[Limitations](guides/03-limitations.md)** — what is not implemented and where this
    toolkit knowingly diverges from the spec. **Read this before planning work.**
+4. **[Foundry and revm](guides/04-foundry.md)** — the patched forge, and what is still
+   needed for `forge test` and anvil to handle frame transactions.
 
 ## Examples
 
