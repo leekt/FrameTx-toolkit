@@ -12,15 +12,11 @@ opcodes and patches Foundry to use that fork.
 
 | Capability | State |
 |---|---|
-| revm knows the six opcodes | **Done** — declared, implemented, table-wired, 7 behavioural tests |
+| revm executes the six opcodes | **Done** — 8 behavioural tests |
 | `forge` built against the patched revm | **Done** — every revm crate resolves to the fork |
-| Frame context available to a test | **Not yet** — needs the cheatcode below |
-| `forge test` executing a frame account | Blocked on the cheatcode |
-| anvil accepting type `0x06` transactions | Not started — see [what a testnet needs](#what-a-real-testnet-still-needs) |
-
-Today the opcodes are *known* to forge's EVM but halt, because outside a frame
-transaction there is no context to report on. That halt is correct spec
-behaviour; supplying a context is what the cheatcode does.
+| `setFrameTx` / `clearFrameTx` cheatcodes | **Done** |
+| `forge test` executing frame accounts | **Done** — 53 tests in `contracts/` |
+| anvil accepting type `0x06` transactions | Not started — see [what a node still needs](#what-a-node-still-needs) |
 
 ## Building
 
@@ -44,111 +40,47 @@ Confirm the patch took:
 grep -A2 'name = "revm-interpreter"' foundry/Cargo.lock   # source = git+.../leekt/revm
 ```
 
-## The remaining piece: a frame-tx cheatcode
+## How the context reaches the EVM
 
-`Host::frame_context()` defaults to `None`, so Foundry's host returns no context
-and every frame opcode halts. The fix is to store a context where the `Host` impl
-can reach it and let a cheatcode populate it.
+The frame opcodes need a transaction context, and outside a frame transaction there is none,
+so they halt. Supplying one turned out to be the whole design problem.
 
-### Where it hooks in
+The first attempt put it on revm's `TxEnv` and the `Transaction` trait. Both are shared
+types: adding a public field breaks every downstream struct literal, and adding a trait
+method returning a reference forces lifetime bounds on every implementor. That broke
+`alloy-evm` and `tempo-precompiles`, neither of which has anything to do with EIP-8141, and
+would have meant forking both.
 
-`Context` implements `Host` directly at `revm/crates/context/src/context.rs:437`.
-The frame context is transaction-scoped, so it belongs on the transaction
-environment:
+What works instead is a thread-local slot in `revm-interpreter`, installed by the cheatcode.
+No shared revm type changes, so no cascade. The instructions check the host first and fall
+back to the slot, so a host that models frame transactions natively — anvil, eventually —
+overrides `Host::frame_context()` and ignores the slot entirely.
 
-1. `revm/crates/context/src/tx.rs` — add `frame_tx: Option<FrameTxContext>` to
-   `TxEnv` and its builder.
-2. `revm/crates/context/interface/src/transaction/mod.rs` — add
-   `fn frame_tx_context(&self) -> Option<&FrameTxContext> { None }` to the
-   `Transaction` trait, plus a `_mut` accessor for recording approvals.
-3. `revm/crates/context/src/context.rs` — in the `Host` impl, forward
-   `frame_context()` to `self.tx().frame_tx_context()` and `frame_approve()` to
-   the mutable accessor.
-4. `foundry/crates/cheatcodes/spec/src/vm.rs` — declare the cheatcodes.
-5. `foundry/crates/cheatcodes/src/evm.rs` — implement them, writing through
-   `ccx.ecx.tx_mut()`. Follow `coinbaseCall` (line 574) as the template; it is
-   the same shape.
+That kept the fork count at two.
 
-The types are already defined in `revm/crates/context/interface/src/host.rs`
-(`FrameTxContext`, `FrameInfo`, `FrameSigInfo`), and `DummyHost` already carries
-a `frame_tx` field showing the wiring.
-
-### Proposed surface
+### The cheatcodes
 
 ```solidity
-struct FrameTxFrame {
-    uint8   mode;      // 0 DEFAULT, 1 VERIFY, 2 SENDER
-    uint8   flags;
-    address target;    // resolved target
-    uint64  gasLimit;
-    uint256 value;
-    bytes   data;
-}
+struct FrameTxFrame  { uint8 mode; uint8 flags; address target; uint64 gasLimit;
+                       uint256 value; bytes data; uint8 status; }
+struct FrameTxSignature { uint8 scheme; address signer; bytes32 msgHash; bytes signature; }
+struct FrameTx { address sender; uint64 nonce; bytes32 sigHash; uint256 maxCost;
+                 uint64 frameIndex; uint64 approvableScopes;
+                 FrameTxFrame[] frames; FrameTxSignature[] signatures; }
 
-struct FrameTxSignature {
-    uint8   scheme;    // 0 ARBITRARY, 1 SECP256K1, 2 P256
-    address signer;    // resolved signer
-    bytes32 msgHash;
-    bytes   signature;
-}
-
-/// Installs a frame transaction context so the frame opcodes resolve.
-function setFrameTx(
-    address sender,
-    uint64 nonce,
-    bytes32 sigHash,
-    FrameTxFrame[] calldata frames,
-    FrameTxSignature[] calldata signatures
-) external;
-
-/// Selects which frame is currently executing, for TXPARAM(0x0A) and the
-/// FRAMEPARAM status rule.
-function setFrameIndex(uint64 index) external;
-
-/// Scopes APPROVE is permitted to grant, mirroring frame.flags & 0x3.
-function setFrameApprovableScopes(uint64 scopes) external;
-
-/// The scope APPROVE actually granted, or 0. Lets a test assert what the
-/// account approved rather than only that it did not revert.
-function frameApproval() external view returns (uint64);
-
-/// Removes the context; the frame opcodes halt again.
+function setFrameTx(FrameTx calldata frameTx) external;
 function clearFrameTx() external;
 ```
 
-A test then reads:
+`approvableScopes` mirrors `frame.flags & 0x3`. `APPROVE` reverts for anything outside it,
+which is the spec's subset rule, and is how a test pins the exact scope an account asked for:
+set the mask to `0x1` and a correct account asking for `0x3` must fail.
 
-```solidity
-function test_ownerApproves() public {
-    vm.setFrameTx(sender, 0, sigHash, frames, sigs);
-    vm.setFrameApprovableScopes(0x3);
-    (bool ok,) = address(account).call("");
-    assertTrue(ok);
-    assertEq(vm.frameApproval(), 3);   // execution + payment
-}
-```
+> [!note] Not in published forge-std yet
+> `contracts/test/FrameTest.sol` declares the `IFrameVm` interface inline against `vm`'s
+> address. Regenerating Foundry's `cheatcodes.json` and bundled `Vm.sol` would remove that.
 
-> [!tip] Assert the scope, not just success
-> `APPROVE` reverting and `APPROVE` granting the wrong scope look identical if a
-> test only checks that the call succeeded. Operand order for `APPROVE` is
-> `offset, length, scope` with offset on top; getting it backwards silently
-> approves the wrong thing. This exact bug appeared in `FRAMEPARAM` during
-> development and only a behavioural test caught it.
-
-## Testing today, without the cheatcode
-
-Two things work now:
-
-**Policy logic** — `contracts/` is a normal Foundry project covering the
-authorisation logic (thresholds, duplicate signers, session-key expiry,
-allowlists, selector extraction) with 14 tests including fuzz. That is where the
-bugs are; it needs no frame opcodes. See [contracts/README.md](../contracts/README.md).
-
-**Compiled artifacts** — `contracts/script/build-frame-accounts.sh` compiles the
-example accounts with the patched solc. Once the cheatcode lands, `vm.etch` those
-runtimes into a test and call them.
-
-## What a real testnet still needs
+## What a node still needs
 
 Executing the opcodes is not the same as executing a frame transaction. anvil
 would additionally need:
@@ -164,12 +96,10 @@ would additionally need:
 | Frame receipts | `[status, gas_used, logs]` per frame, plus the payer |
 | Expiry verifier | The `0x8141` predeploy |
 
-All of that exists and is tested in the [go-ethereum
-fork](https://github.com/leekt/go-ethereum/tree/fix/eip8141-frame-tx), which is
-the only implementation that executes a whole frame transaction today. Porting it
-into revm is a substantially larger job than adding the opcodes was — the
-opcodes were about 600 lines; this is the rest of the EIP.
+Each piece is independent of the others, and none of it is needed to test an account: the
+`setFrameTx` cheatcode supplies the context directly, which is what `contracts/test` uses.
 
-Until that lands, the geth fork remains the conformance reference: if revm and
-geth disagree, geth is the one written directly against the spec text and covered
-by end-to-end frame-execution tests.
+Porting them is substantially larger than adding the opcodes was -- the opcodes were about
+600 lines, this is the rest of the EIP. When it lands, anvil should implement
+`Host::frame_context()` natively; the instructions prefer the host over the tooling slot, so
+no test written today will need changing.

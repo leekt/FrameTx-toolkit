@@ -1,8 +1,7 @@
 # Building the toolkit
 
-Two components: a patched **go-ethereum** that executes frame transactions, and a patched
-**solc** that compiles contracts using the new opcodes. They are independent — build only
-what you need.
+Two components: a patched **Foundry** (whose revm executes the frame opcodes) and a patched
+**solc** that compiles contracts using them. Build both; the tests need both.
 
 ## Clone with submodules
 
@@ -20,19 +19,23 @@ git submodule update --init --recursive
 Both submodules are pinned to exact commits (see [VERSIONS.md](../VERSIONS.md)). That is
 deliberate — `git submodule update` restores the tested combination.
 
-## go-ethereum
+## Foundry
 
-Go 1.21+.
+Rust toolchain. A cold build takes roughly 15 minutes.
 
 ```bash
-cd go-ethereum
-go build ./...
-go test ./core/ -run TestFrameTx -v
+cd foundry
+cargo build --bin forge --release
 ```
 
-The tests are the entry point — there is no way to submit a frame transaction to a running
-node yet, so the Go test harness is the whole story. See
-[02-writing-accounts.md](02-writing-accounts.md) and [03-limitations.md](03-limitations.md).
+The binary lands at `foundry/target/release/forge`. Use that one -- a
+stock `forge` cannot execute the frame opcodes.
+
+```bash
+cd ../contracts
+SOLC=../solidity/build/solc/solc ./script/build-frame-accounts.sh
+../foundry/target/release/forge test        # 53 tests
+```
 
 ## solc
 

@@ -54,7 +54,7 @@ operand value**. Ethereum has consistently gone the other way, at real cost:
   arity from the type section. Never from a stack value.
 
 Both mature implementations encode this assumption structurally: solc's `InstructionInfo` has
-`int args; int ret;` and geth's `operation` has `minStack int; maxStack int;`. Neither schema
+`int args; int ret;` and revm's opcode table declares `stack_io(n, m)`. Neither schema
 can represent a variable-arity opcode, and both have covered every opcode across every fork.
 
 EIP-8141 also breaks its **own** convention here: it allocates two separate opcodes for frame
@@ -68,7 +68,7 @@ fixed arity 4 (`memOffset, dataOffset, length, signatureIndex`) — exactly para
 set uniform and representable in every fixed-arity toolchain.
 
 The cost of not doing so is not hypothetical: it produced two defects in this toolkit. solc
-can only expose one of the two forms as a builtin, and geth's interpreter needed an explicit
+can only expose one of the two forms as a builtin, and revm's implementation needed an explicit
 stack-depth guard where `minStack` could only promise two operands — without it, three bytes
 of bytecode panicked the node.
 
@@ -100,20 +100,6 @@ regarded as one of Script's worst corners, and Tapscript
 ([BIP-342](https://github.com/bitcoin/bips/blob/master/bip-0342.mediawiki)) **disabled it** in
 favour of the fixed-arity `OP_CHECKSIGADD`. The one major chain that shipped a
 stack-determined-arity opcode later removed it.
-
-### Calldata pricing follows EIP-7623, not EIP-7976
-
-EIP-8141 specifies EIP-7623 pricing (`STANDARD_TOKEN_COST` 4, floor 10). The geth branch is
-otherwise post-Amsterdam, which reprices calldata to 64/64 under EIP-7976. The
-implementation follows the EIP text, so **frame transactions and other transactions in the
-same block price calldata differently**. Flipping this is one constant in
-`core/types/tx_frame.go` (`GasLimits`).
-
-### Modelled as a standalone `frameTime` fork
-
-EIP-8141 is not assigned to a named fork upstream, so the geth branch introduces its own
-`frameTime`, gated on Bogota. If the EIP is scheduled into a real fork, this should be
-folded into that fork's activation instead.
 
 ### `APPROVE` in a STATICCALL context
 

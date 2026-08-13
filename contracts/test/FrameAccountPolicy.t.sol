@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
-import {FrameAccountPolicy} from "../src/FrameAccountPolicy.sol";
+import {FrameAccountPolicy} from "../src/policy/FrameAccountPolicy.sol";
 
 contract FrameAccountPolicyTest is Test {
     using FrameAccountPolicy for *;

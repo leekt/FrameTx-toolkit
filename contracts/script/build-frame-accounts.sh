@@ -33,7 +33,7 @@ rm -f /tmp/.frame_probe.sol
 mkdir -p "$OUT"
 shopt -s nullglob
 found=0
-for sol in "$REPO_ROOT"/examples/*/*.sol; do
+for sol in "$(dirname "${BASH_SOURCE[0]}")/../src/accounts"/*.sol; do
     name="$(basename "$sol" .sol)"
     echo "compiling $name"
     # --no-cbor-metadata keeps the output reproducible: the CBOR blob encodes the
@@ -44,7 +44,7 @@ for sol in "$REPO_ROOT"/examples/*/*.sol; do
 done
 
 if [[ $found -eq 0 ]]; then
-    echo "no frame contracts found under $REPO_ROOT/examples" >&2
+    echo "no frame contracts found under contracts/src/accounts" >&2
     exit 1
 fi
 echo

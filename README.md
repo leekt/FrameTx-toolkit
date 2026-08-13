@@ -1,8 +1,8 @@
 # FrameTx Toolkit
 
 Everything needed to write and run [EIP-8141](spec/EIP8141.md) frame transaction contracts:
-a patched **go-ethereum** that executes them, a patched **solc** that compiles them, and
-worked smart-account examples.
+a patched **revm/Foundry** that executes them, a patched **solc** that compiles them, and
+worked smart accounts with tests.
 
 EIP-8141 is a **draft**. Every component here is pinned to an exact commit — see
 [VERSIONS.md](VERSIONS.md) — so a future spec revision can be diffed against a known
@@ -10,6 +10,7 @@ baseline rather than guessed at.
 
 ```bash
 git clone --recurse-submodules https://github.com/leekt/FrameTx-toolkit.git
+cd FrameTx-toolkit/contracts && forge test        # 53 tests
 ```
 
 ## What EIP-8141 changes
@@ -39,12 +40,11 @@ That compiles to about 20 bytes of validation logic.
 
 | Path | What |
 |---|---|
-| [`go-ethereum/`](https://github.com/leekt/go-ethereum/tree/fix/eip8141-frame-tx) | Submodule — executes frame transactions |
 | [`solidity/`](https://github.com/leekt/solidity/tree/feat/eip8141-frame-opcodes) | Submodule — compiles the six new opcodes |
-| [`revm/`](https://github.com/leekt/revm/tree/feat/eip8141-frame-opcodes) | Submodule — executes the six new opcodes, for Foundry |
+| [`revm/`](https://github.com/leekt/revm/tree/feat/eip8141-frame-opcodes) | Submodule — executes the six new opcodes |
+| [`foundry/`](https://github.com/leekt/foundry/tree/feat/eip8141-frame-opcodes) | Submodule — `forge` with the frame cheatcodes |
 | [`spec/EIP8141.md`](spec/EIP8141.md) | The pinned spec text, vendored |
-| [`examples/`](examples/) | Worked accounts and a paymaster |
-| [`contracts/`](contracts/) | Foundry project — tested policy layer, plus a build script for the frame glue |
+| [`contracts/`](contracts/) | The Foundry project: accounts in `src/accounts`, policy in `src/policy`, **all tests** in `test/` |
 | [`guides/`](guides/) | Build, write, and what does not work yet |
 | [`tools/check-spec-drift.sh`](tools/check-spec-drift.sh) | Detect whether the spec moved |
 
@@ -59,16 +59,20 @@ That compiles to about 20 bytes of validation logic.
 4. **[Foundry and revm](guides/04-foundry.md)** — the patched forge, and what is still
    needed for `forge test` and anvil to handle frame transactions.
 
-## Examples
+## Accounts
 
-| Example | Language | Demonstrates |
-|---|---|---|
-| [01 — EOA default code](examples/01-eoa-default-code/) | — | Validating with no contract at all; the migration path for existing EOAs |
-| [02 — Minimal Yul account](examples/02-yul-minimal-account/) | Yul | The smallest real account, and how to emit the opcodes on **stock** solc via `verbatim` |
-| [03 — Solidity owner account](examples/03-solidity-owner-account/) | Solidity | The canonical starting point |
-| [04 — Multisig account](examples/04-multisig-account/) | Solidity | k-of-n over protocol-verified signatures, with no signature parsing |
-| [05 — Session key account](examples/05-session-key-account/) | Solidity | Cross-frame introspection to constrain what a delegated key may do |
-| [06 — Paymaster](examples/06-paymaster/) | Solidity | Third-party gas sponsorship |
+All under [`contracts/src/accounts`](contracts/src/accounts), each with notes in
+[`contracts/docs`](contracts/docs) and tests in [`contracts/test`](contracts/test).
+
+| Account | Demonstrates |
+|---|---|
+| `account.yul` | The smallest real account, 19 bytes, and how to emit the opcodes on **stock** solc via `verbatim` |
+| `OwnerAccount.sol` | The canonical starting point |
+| `MultisigAccount.sol` | k-of-n over protocol-verified signatures, with no signature parsing |
+| `SessionKeyAccount.sol` | Cross-frame introspection to constrain a delegated key |
+| `SponsoringPaymaster.sol` | Third-party gas sponsorship |
+
+`contracts/docs/01-eoa-default-code.md` covers the no-contract EOA path.
 
 ## Two things that will trip you up
 
@@ -77,11 +81,10 @@ that is the ERC-20 method name and appears in a large share of deployed Solidity
 it as a compiler builtin would break existing contracts. The opcode byte `0xaa` is
 unchanged. `approve` stays free for your own code.
 
-**You cannot submit a frame transaction to a node yet.** The transaction pool now accepts
-self-relay frame transactions under the spec's structural prefix rules, but there is no RPC
-or networking layer to get one into the pool from outside, no prefix simulation, and
-paymaster prefixes are rejected. Contracts are exercised through the Go test harness in
-`go-ethereum/core/eip8141_test.go`. See [limitations](guides/03-limitations.md).
+**Accounts are tested with `forge`, not against a node.** `forge test` executes the frame
+opcodes for real via the patched revm, with the transaction context supplied by the
+`setFrameTx` cheatcode. anvil does not yet accept type `0x06` transactions. See
+[limitations](guides/03-limitations.md).
 
 ## When the spec changes
 

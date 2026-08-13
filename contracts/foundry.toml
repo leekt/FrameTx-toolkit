@@ -4,7 +4,10 @@
 # because Foundry cannot compile it (evm_version "@future" is not in its enum)
 # and could not execute it if it could (revm has no 0xaa/0xb0-0xb4).
 [profile.default]
-src = "src"
+# Only the policy layer is compiled by forge. The accounts in src/accounts use
+# the frame opcodes, which forge cannot compile; build-frame-accounts.sh handles
+# them with the patched solc and tests load the artifacts with vm.etch.
+src = "src/policy"
 test = "test"
 out = "out"
 libs = ["lib"]

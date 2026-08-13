@@ -88,10 +88,6 @@ list) or walk every frame yourself. The session-key example does the latter.
 nonce, sets the payer and collects `max_cost`. Functions using only the introspection
 opcodes cannot be `pure` but can be `view`.
 
-**Frame gas limits must cover state gas.** On this geth branch a fresh storage slot costs
-`64 × 1530 = 97,920` state gas. A frame doing one `SSTORE` to a new slot needs a limit
-comfortably above 100,000; `100_000` fails with a bare out-of-gas that reads like a logic
-error.
 
 ## Compiling
 
@@ -115,28 +111,34 @@ argument list reads in the same order as the spec's stack table. Verified —
 
 ## Testing an account
 
-There is no txpool or RPC, so accounts are exercised through the Go test harness. Copy the
-pattern in `go-ethereum/core/eip8141_test.go`:
+Accounts are tested with `forge`, using the patched build. `contracts/test/FrameTest.sol`
+is the base class:
 
-```go
-sdb := mkState(types.GenesisAlloc{
-    accountAddr: {Balance: newGwei(1_000_000_000), Code: compiledRuntime,
-                  Storage: map[common.Hash]common.Hash{{}: common.BytesToHash(owner.Bytes())}},
-})
-tx := /* frames: selfVerifyFrame(...), senderFrame(target, gas, 0) */
-res, err := applyFrameTx(t, sdb, tx)
+```solidity
+contract MyAccountTest is FrameTest {
+    address constant ACCOUNT = address(0xACC0);
+
+    function setUp() public {
+        deployAccount("MyAccount", ACCOUNT);   // etches the compiled runtime
+        vm.store(ACCOUNT, bytes32(0), bytes32(uint256(uint160(OWNER))));
+    }
+
+    function test_ownerApproves() public {
+        IFrameVm.FrameTx memory ctx = verifyContext(ACCOUNT, SCOPE_BOTH, bytes32(0));
+        ctx.signatures = new IFrameVm.FrameTxSignature[](1);
+        ctx.signatures[0] = secpSig(OWNER);
+        assertApproves(ACCOUNT, ctx, "owner should approve");
+    }
+}
 ```
 
-`TestFrameTxYulSmartAccount` runs both a Yul-compiled and a Solidity-compiled account this
-way and is the template to copy.
+`vm.setFrameTx` installs the transaction context so the frame opcodes resolve; execution is
+real, not mocked.
 
-Two gotchas when building transactions by hand:
-
-- **Signature byte order is `v || r || s`.** Go's `crypto.Sign` returns `r || s || v`, and
-  `v` is the recovery id `0`/`1`, not `27`/`28`.
-- **The canonical signature hash elides empty-`msg` signature bytes**, so for those entries
-  the hash is the same before and after you fill in the signature. Entries with an explicit
-  32-byte `msg` *do* commit to their bytes, so compute the hash last.
+> [!warning] Always include a positive case
+> `assertRefuses` passes if the call fails for *any* reason, including the account never
+> being deployed. A file of only negative assertions is green and worthless. Every test file
+> must contain at least one `assertApproves` proving the setup is genuinely correct.
 
 ## Reproducible bytecode
 

@@ -51,7 +51,8 @@ including fuzz runs.
 
 The frame glue — read the signers with `sigparam`, inspect frames with
 `frameparam`, approve with `approvetx` — is a handful of lines with no branching
-logic. It is exercised against a real EVM in `go-ethereum/core/eip8141_test.go`.
+logic. It is exercised against a real EVM by the account tests in `test/`, which run the
+compiled runtimes under the patched revm.
 
 So the split is not a workaround grafted on to dodge a tooling limit; separating
 an authorisation policy from its entrypoint is how you would write this anyway.
