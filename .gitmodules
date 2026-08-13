@@ -6,3 +6,7 @@
 	path = solidity
 	url = https://github.com/leekt/solidity.git
 	branch = feat/eip8141-frame-opcodes
+[submodule "revm"]
+	path = revm
+	url = https://github.com/leekt/revm.git
+	branch = feat/eip8141-frame-opcodes
