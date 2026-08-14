@@ -16,7 +16,10 @@ opcodes and patches Foundry to use that fork.
 | `forge` built against the patched revm | **Done** — every revm crate resolves to the fork |
 | `setFrameTx` / `clearFrameTx` cheatcodes | **Done** |
 | `forge test` executing frame accounts | **Done** — 53 tests in `contracts/` |
-| anvil accepting type `0x06` transactions | Not started — see [what a node still needs](#what-a-node-still-needs) |
+| anvil accepting type `0x06` transactions | **Done** — decode, validate, execute; 11 integration tests |
+| Atomic batches and default code in anvil | **Done** — terminator rollback, mid-batch skip, signature-index selection all pinned |
+| Per-frame receipts over RPC | Not exposed yet |
+| Paymaster (`pay`) frames end to end | Untested |
 
 ## Building
 
@@ -80,26 +83,26 @@ set the mask to `0x1` and a correct account asking for `0x3` must fail.
 > `contracts/test/FrameTest.sol` declares the `IFrameVm` interface inline against `vm`'s
 > address. Regenerating Foundry's `cheatcodes.json` and bundled `Vm.sol` would remove that.
 
-## What a node still needs
+## Using anvil with frame transactions
 
-Executing the opcodes is not the same as executing a frame transaction. anvil
-would additionally need:
+anvil accepts type `0x06` via `eth_sendRawTransaction`. The envelope, canonical
+signature hash (with empty-`msg` elision), `v‖r‖s` secp256k1 entries, frame
+execution with correct callers, VERIFY-as-static, the approval context, atomic
+batches and default code are all implemented and covered by
+`crates/anvil/tests/it/frame_tx.rs` in the foundry submodule — 11 integration
+tests that assert on resulting *state* (storage written, nonce incremented,
+batches rolled back), not merely on receipts.
 
-| Piece | What it involves |
+Anvil has no journal at the frame boundary — frames commit to the database so
+later frames can observe earlier writes — so batch rollback is implemented as a
+first-touch snapshot that replays prior values on failure. The rationale is
+documented in `crates/anvil/src/eth/backend/frame_tx.rs`.
+
+Still open:
+
+| Gap | Notes |
 |---|---|
-| The `0x06` transaction type | RLP payload, canonical signature hash with elision, secp256k1 `v‖r‖s` and P256 validation |
-| The frame execution loop | Mode dispatch, caller selection, `ORIGIN` override, VERIFY-as-STATICCALL |
-| Approval context | `payer`, `sender_approved`, nonce increment, `max_cost` collection and settlement |
-| Atomic batches | Rollback to the batch start, skip-and-refund for remaining frames |
-| Default code | The empty-code account path, which is how EOAs use frame transactions |
-| Gas accounting | Intrinsic, per-frame, calldata floor, refunds, payer refund |
-| Frame receipts | `[status, gas_used, logs]` per frame, plus the payer |
-| Expiry verifier | The `0x8141` predeploy |
-
-Each piece is independent of the others, and none of it is needed to test an account: the
-`setFrameTx` cheatcode supplies the context directly, which is what `contracts/test` uses.
-
-Porting them is substantially larger than adding the opcodes was -- the opcodes were about
-600 lines, this is the rest of the EIP. When it lands, anvil should implement
-`Host::frame_context()` natively; the instructions prefer the host over the tooling slot, so
-no test written today will need changing.
+| Per-frame receipts | `[status, gas_used, logs]` per frame is not exposed over RPC |
+| Paymaster path | The `[only_verify, pay]` layout is untested end to end |
+| Expiry verifier | The `0x8141` predeploy is not installed in anvil's genesis |
+| Mempool rules | The spec's validation-prefix DoS policy is not implemented |

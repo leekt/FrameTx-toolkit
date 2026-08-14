@@ -81,10 +81,11 @@ that is the ERC-20 method name and appears in a large share of deployed Solidity
 it as a compiler builtin would break existing contracts. The opcode byte `0xaa` is
 unchanged. `approve` stays free for your own code.
 
-**Accounts are tested with `forge`, not against a node.** `forge test` executes the frame
-opcodes for real via the patched revm, with the transaction context supplied by the
-`setFrameTx` cheatcode. anvil does not yet accept type `0x06` transactions. See
-[limitations](guides/03-limitations.md).
+**anvil accepts frame transactions.** Send a type `0x06` envelope via
+`eth_sendRawTransaction` and it is validated, mined and executed — including atomic
+batches and the default-code EOA path. `forge test` additionally exercises accounts in
+isolation via the `setFrameTx` cheatcode. Per-frame receipts are not yet exposed over
+RPC; see [guides/04-foundry.md](guides/04-foundry.md).
 
 ## When the spec changes
 
