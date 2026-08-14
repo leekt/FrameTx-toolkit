@@ -40,6 +40,11 @@ library FrameTxLib {
     uint256 internal constant SCOPE_EXECUTION = 2;
     uint256 internal constant SCOPE_BOTH = 3;
 
+    /// The expiry verifier predeploy (`EXPIRY_VERIFIER`). A VERIFY frame
+    /// targeting it carries an 8-byte big-endian deadline and reverts the
+    /// transaction once `block.timestamp` passes it.
+    address internal constant EXPIRY_VERIFIER = address(0x8141);
+
     // ----------------------------------------------------- transaction scope
 
     /// @notice The current transaction type (TXPARAM 0x00).
@@ -225,6 +230,20 @@ library FrameTxLib {
     /// @notice A frame's full input data.
     function frameData(uint256 frameIndex) internal view returns (bytes memory) {
         return frameDataSlice(frameIndex, 0, frameDataLength(frameIndex));
+    }
+
+    /// @notice Whether the frame is the expiry verifier frame. The protocol
+    ///         admits at most one, only as frame 0, so `isExpiryFrame(0)` is the
+    ///         whole question of whether the transaction carries a deadline.
+    function isExpiryFrame(uint256 frameIndex) internal view returns (bool) {
+        return frameMode(frameIndex) == MODE_VERIFY && frameTarget(frameIndex) == EXPIRY_VERIFIER;
+    }
+
+    /// @notice An expiry frame's deadline: its 8-byte big-endian frame data,
+    ///         which FRAMEDATALOAD returns left-aligned in the first word. Only
+    ///         meaningful when `isExpiryFrame(frameIndex)` holds.
+    function expiryDeadline(uint256 frameIndex) internal view returns (uint64) {
+        return uint64(uint256(frameDataLoad(frameIndex, 0)) >> 192);
     }
 
     // ------------------------------------------------------- signature scope

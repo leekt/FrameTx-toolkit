@@ -26,6 +26,8 @@ interface IHarness {
         view
         returns (bytes memory);
     function frameData(uint256 i) external view returns (bytes memory);
+    function isExpiryFrame(uint256 i) external view returns (bool);
+    function expiryDeadline(uint256 i) external view returns (uint64);
     function sigSigner(uint256 i) external view returns (address);
     function sigScheme(uint256 i) external view returns (uint256);
     function sigMsg(uint256 i) external view returns (bytes32);
@@ -156,6 +158,24 @@ contract FrameTxLibTest is FrameTest {
             abi.encodePacked(hex"0102", new bytes(2)),
             "slice crossing the end zero-filled"
         );
+    }
+
+    /// An expiry verifier frame is recognised by mode + target, and its 8-byte
+    /// big-endian deadline read back from the left-aligned FRAMEDATALOAD word.
+    function test_expiryFrame() public {
+        IFrameVm.FrameTx memory ctx = _ctx();
+        ctx.frames[0].target = address(0x8141);
+        ctx.frames[0].data = abi.encodePacked(uint64(1_234_567_890));
+        fvm.setFrameTx(ctx);
+        assertTrue(h.isExpiryFrame(0), "frame 0 is the expiry frame");
+        assertEq(h.expiryDeadline(0), 1_234_567_890, "deadline");
+        assertFalse(h.isExpiryFrame(1), "frame 1 is not");
+        fvm.clearFrameTx();
+    }
+
+    function test_nonExpiryFrameNotRecognised() public inFrame {
+        // Frame 0 is a VERIFY frame, but targets the account, not 0x8141.
+        assertFalse(h.isExpiryFrame(0), "ordinary VERIFY frame is not an expiry frame");
     }
 
     function test_sigScope() public inFrame {

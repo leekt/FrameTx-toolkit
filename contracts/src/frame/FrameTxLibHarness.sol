@@ -93,6 +93,14 @@ contract FrameTxLibHarness {
         return FrameTxLib.frameData(i);
     }
 
+    function isExpiryFrame(uint256 i) external view returns (bool) {
+        return FrameTxLib.isExpiryFrame(i);
+    }
+
+    function expiryDeadline(uint256 i) external view returns (uint64) {
+        return FrameTxLib.expiryDeadline(i);
+    }
+
     function sigSigner(uint256 i) external view returns (address) {
         return FrameTxLib.sigSigner(i);
     }

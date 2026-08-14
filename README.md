@@ -69,7 +69,7 @@ All under [`contracts/src/accounts`](contracts/src/accounts), each with notes in
 | `account.yul` | The smallest real account, 19 bytes, and how to emit the opcodes on **stock** solc via `verbatim` |
 | `OwnerAccount.sol` | The canonical starting point |
 | `MultisigAccount.sol` | k-of-n over protocol-verified signatures, with no signature parsing |
-| `SessionKeyAccount.sol` | Cross-frame introspection to constrain a delegated key |
+| `SessionKeyAccount.sol` | Cross-frame introspection to constrain a delegated key, with expiry via the expiry verifier frame |
 | `SponsoringPaymaster.sol` | Third-party gas sponsorship |
 
 `contracts/docs/01-eoa-default-code.md` covers the no-contract EOA path.

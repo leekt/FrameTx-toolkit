@@ -4,7 +4,8 @@
 
 - the **owner** key may do anything;
 - a registered **session key** may only drive calls on an allowlist of
-  `(target, selector)` pairs, and only with `value == 0`.
+  `(target, selector)` pairs, only with `value == 0`, and only until the key's
+  `validUntil` timestamp.
 
 The account never runs `ecrecover`. Every `SECP256K1`/`P256` signature in the
 envelope was already verified by the protocol against `compute_sig_hash(tx)`
@@ -44,15 +45,48 @@ with `caller == ENTRY_POINT`, not as this account, so they cannot spend its
 funds or speak in its name. (A `DEFAULT` frame *targeting* this account arrives
 with `msg.sender == ENTRY_POINT`, which the `onlyAdmin` modifier rejects.)
 
+## Expiry, without reading the clock
+
+`TIMESTAMP` is banned during validation-prefix execution (spec, *Banned opcodes*),
+so the account cannot compare `block.timestamp` to a key's `validUntil` itself —
+and the spec's security section explains why a naive `block.timestamp` check
+would be a mempool-invalidation grief anyway. The sanctioned mechanism is the
+**expiry verifier frame**: a `VERIFY` frame targeting `EXPIRY_VERIFIER`
+(`address(0x8141)`) whose data is exactly an 8-byte big-endian deadline. The
+protocol admits it only as frame 0 and reverts the whole transaction once
+`block.timestamp > deadline`.
+
+That turns expiry into pure introspection. When the signer is a session key,
+`_checkExpiry` requires:
+
+```solidity
+if (!FrameTxLib.isExpiryFrame(0)) revert NoExpiryFrame();
+uint64 deadline = FrameTxLib.expiryDeadline(0);
+if (deadline > validUntil) revert ExpiryBeyondSessionKey(deadline, validUntil);
+```
+
+The protocol guarantees the transaction dies at `deadline`; the account
+guarantees `deadline <= validUntil`; together, the key cannot act after it
+expires. A session-key transaction with no expiry frame is refused outright —
+it would otherwise be valid forever. Owner-signed transactions carry no such
+requirement: the owner's authority is not time-bounded.
+
+`sessionKeys[key]` stores the `validUntil` directly (`0` disables the key), so
+registration, expiry, and revocation are one mapping.
+
 ## Frame layout
 
 Self-relay layout — the account pays its own gas:
 
 | # | mode         | flags               | target              | value | data                       | purpose |
 |---|--------------|---------------------|---------------------|-------|----------------------------|---------|
-| 0 | `VERIFY` (1) | `0x3` (BOTH)        | `null` or `sender`  | 0     | `0x6901f668` (`validate()`)| Authenticate the signer, walk the SENDER frames, `APPROVE(0x3)` |
-| 1 | `SENDER` (2) | `0x0`               | e.g. token address  | 0     | `transfer(...)`            | The restricted operation |
-| 2 | `SENDER` (2) | `0x0`               | e.g. token address  | 0     | `approve(...)`             | Another one, also checked by frame 0 |
+| 0 | `VERIFY` (1) | `0x0`               | `EXPIRY_VERIFIER` (`0x8141`) | 0 | 8-byte deadline   | Protocol-enforced expiry; required by the account for session keys |
+| 1 | `VERIFY` (1) | `0x3` (BOTH)        | `null` or `sender`  | 0     | `0x6901f668` (`validate()`)| Authenticate the signer, check the deadline, walk the SENDER frames, `APPROVE(0x3)` |
+| 2 | `SENDER` (2) | `0x0`               | e.g. token address  | 0     | `transfer(...)`            | The restricted operation |
+| 3 | `SENDER` (2) | `0x0`               | e.g. token address  | 0     | `approve(...)`             | Another one, also checked by frame 1 |
+
+For an owner-signed transaction frame 0 may be omitted and the layout collapses
+to the usual `self_verify` prefix.
 
 Frame 0's target must be `null` or `tx.sender`: the spec's static constraints
 reject `flags & APPROVE_EXECUTION` on any other target, and `APPROVE` itself
@@ -84,7 +118,9 @@ Signature entry (either layout):
 
 ## Operand order (top of stack first)
 
-The first Yul argument is the **topmost** stack item. Verified against
+The account itself reads everything through [`FrameTxLib`](07-frametx-library.md),
+which hides this; the table stays here for anyone dropping to raw assembly. The
+first Yul argument is the **topmost** stack item. Verified against
 `libevmasm/Instruction.cpp` in the patched solc and against
 `core/vm/frame_ops.go` in the patched geth:
 
@@ -109,10 +145,10 @@ name is left free for the ERC-20 method.
 
 **Selector extraction.** `FRAMEDATALOAD(0, i)` returns the first 32-byte word of
 frame `i`'s data with the selector left-aligned in the high 4 bytes, exactly
-like `calldataload(0)`. So the selector is `shr(224, word)`:
+like `calldataload(0)`. So the selector is the word's high 4 bytes:
 
 ```solidity
-bytes4 selector = bytes4(uint32(_frameDataLoad(0, i) >> 224));
+bytes4 selector = bytes4(FrameTxLib.frameDataLoad(i, 0));
 ```
 
 Because the load zero-pads past the end of `data` (CALLDATALOAD semantics), a
@@ -151,16 +187,11 @@ mempool rule "execution reads storage outside `tx.sender`" → rejected.
     --bin-runtime --optimize --no-cbor-metadata SessionKeyAccount.sol
 ```
 
-Compiler: `0.8.37-develop.2026.8.12+commit.3604bc1e.mod`. Exit code 0; the only
-output on stderr is the standard "pre-release compiler version" warning.
-
-Runtime bytecode — **1314 bytes** (including the trailing CBOR metadata):
-
-```
-608060405234801561000f575f5ffd5b5060043610610060575f3560e01c80631fff047c146100645780632b370b67146100795780636901f6681461008c5780638da5cb5b14610094578063b7b8d604146100c3578063c2b418ac146100f5575b5f5ffd5b6100776100723660046103e4565b610122565b005b61007761008736600461042c565b610184565b6100776101fc565b5f546100a6906001600160a01b031681565b6040516001600160a01b0390911681526020015b60405180910390f35b6100e56100d136600461046c565b60016020525f908152604090205460ff1681565b60405190151581526020016100ba565b6100e561010336600461048c565b600260209081525f928352604080842090915290825290205460ff1681565b5f546001600160a01b0316331480159061013c5750333014155b1561015a5760405163ea8e4eb560e01b815260040160405180910390fd5b6001600160a01b03919091165f908152600160205260409020805460ff1916911515919091179055565b5f546001600160a01b0316331480159061019e5750333014155b156101bc5760405163ea8e4eb560e01b815260040160405180910390fd5b6001600160a01b039092165f9081526002602090815260408083206001600160e01b0319909416835292905220805491151560ff19909216919091179055565b5f5f610206610271565b9150915081158015610216575080155b156102345760405163afd2b59d60e01b815260040160405180910390fd5b81610241576102416102ed565b6006600ab0b35f8190036102685760405163353dfba360e21b815260040160405180910390fd5b805f5faa505050565b5f80600bb0815b818110156102e757600181b4156102df57600281b45f036102df575f80549082b4906001600160a01b03908116908216036102b857600194505050509091565b6001600160a01b0381165f9081526001602052604090205460ff16156102dd57600193505b505b600101610278565b50509091565b6009b05f5b818110156103b65760028082b3036103ae57600881b31561032e57604051630dee74a760e31b8152600481018290526024015b60405180910390fd5b5f81b360048083b3101561035857604051630dee74a760e31b815260048101839052602401610325565b6001600160a01b0381165f9081526002602090815260408083206001600160e01b03198685b11680855292529091205460ff166103ab57604051630dee74a760e31b815260048101849052602401610325565b50505b6001016102f2565b5050565b80356001600160a01b03811681146103d0575f5ffd5b919050565b803580151581146103d0575f5ffd5b5f5f604083850312156103f5575f5ffd5b6103fe836103ba565b915061040c602084016103d5565b90509250929050565b80356001600160e01b0319811681146103d0575f5ffd5b5f5f5f6060848603121561043e575f5ffd5b610447846103ba565b925061045560208501610415565b9150610463604085016103d5565b90509250925092565b5f6020828403121561047c575f5ffd5b610485826103ba565b9392505050565b5f5f6040838503121561049d575f5ffd5b6104a6836103ba565b915061040c6020840161041556
-```
-
-You can spot the introspection opcodes in there: `b0` (`TXPARAM`), `b1`
+Exit code 0; the only output on stderr is the standard "pre-release compiler
+version" warning. The current runtime bytecode lives in
+`out-frame/SessionKeyAccount/SessionKeyAccount.bin-runtime` (1448 bytes,
+`--no-cbor-metadata`). `FrameTxLib` leaves no trace in it — everything inlines —
+and you can spot the introspection opcodes: `b0` (`TXPARAM`), `b1`
 (`FRAMEDATALOAD`), `b3` (`FRAMEPARAM`), `b4` (`SIGPARAM`), and `aa` (`APPROVE`)
 in `805f5faa` — `DUP1 PUSH0 PUSH0 APPROVE`, i.e. the scope duplicated from the
 stack, then `offset = 0`, `length = 0` pushed on top of it.
@@ -170,7 +201,7 @@ Selectors:
 | selector     | function                             |
 |--------------|--------------------------------------|
 | `0x6901f668` | `validate()`                         |
-| `0x1fff047c` | `setSessionKey(address,bool)`        |
+| `0x580da310` | `setSessionKey(address,uint64)`      |
 | `0x2b370b67` | `setAllowedCall(address,bytes4,bool)`|
 | `0x8da5cb5b` | `owner()`                            |
 | `0xb7b8d604` | `sessionKeys(address)`               |
@@ -188,9 +219,10 @@ none is needed to show cross-frame introspection:
   that means reading `TXPARAM(0x06)` (max cost) or `TXPARAM(0x04)`
   (`max_fee_per_gas`) in `validate()` when the signer is a session key, or
   refusing the `APPROVE_PAYMENT` bit outright and requiring a sponsor;
-- no per-key expiry, spend limit, or call counter (all of those need `SSTORE`,
-  which a `VERIFY` frame cannot do — they belong in a `SENDER` frame or in an
-  approval-time read-only check against pre-written state);
+- no spend limit or call counter (both need `SSTORE`, which a `VERIFY` frame
+  cannot do — they belong in a `SENDER` frame or in an approval-time read-only
+  check against pre-written state; per-key *expiry* needs no `SSTORE` and is
+  implemented above via the expiry frame);
 - no argument-level policy (only `(target, selector)`; `FRAMEDATACOPY` is the
   tool for inspecting arguments);
 - no ERC-1271, no batching helper, no upgrade path.

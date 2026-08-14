@@ -1,9 +1,10 @@
 # 07 — FrameTxLib (Solidity library)
 
-Examples 03–06 each hand-roll the same inline assembly: `sigparam` with the operand
-order remembered from the spec, `txparam` with a raw hex param, a comment explaining
-both. `FrameTxLib` is that assembly written once, behind named functions, so an
-account reads like the policy it implements:
+The frame builtins take raw hex params in a spec-defined operand order that is easy
+to get backwards (see the table in [05](05-session-key-account.md)). `FrameTxLib` is
+that assembly written once, behind named functions, so an account reads like the
+policy it implements — examples 03–06 are all written against it, and the raw
+opcodes survive only in the Yul account (02) and in this library's own bodies:
 
 ```solidity
 import {FrameTxLib} from "../src/frame/FrameTxLib.sol";
@@ -28,10 +29,12 @@ everything inlines, nothing needs linking:
 |---|---|
 | Transaction (`TXPARAM`) | `txType` `txNonce` `txSender` `maxPriorityFeePerGas` `maxFeePerGas` `maxFeePerBlobGas` `maxCost` `blobCount` `sigHash` `frameCount` `currentFrameIndex` `signatureCount` |
 | Frame (`FRAMEPARAM`, `FRAMEDATALOAD`, `FRAMEDATACOPY`) | `frameTarget` `frameGasLimit` `frameMode` `frameFlags` `frameDataLength` `frameStatus` `frameAllowedScope` `frameIsAtomicBatch` `frameValue` `frameDataLoad` `frameDataSlice` `frameData` |
+| Expiry | `isExpiryFrame` `expiryDeadline` — recognise the expiry verifier frame and read its 8-byte deadline (see [05](05-session-key-account.md), "Expiry, without reading the clock") |
 | Signature (`SIGPARAM`) | `sigSigner` `sigScheme` `sigMsg` `signedThisTx` `sigLength` `sigDataSlice` `sigData` |
 | Approval (`APPROVE`) | `approve(scope)` `approve(scope, returnData)` |
 
-Constants for every enum the spec defines: `SCHEME_*`, `MODE_*`, `STATUS_*`, `SCOPE_*`.
+Constants for every enum the spec defines: `SCHEME_*`, `MODE_*`, `STATUS_*`, `SCOPE_*`,
+plus the `EXPIRY_VERIFIER` predeploy address.
 
 `sigData`/`sigDataSlice` read an ARBITRARY entry's raw bytes through the `sigdatacopy`
 builtin — the copy form of `SIGPARAM`, which stock solc cannot express (see
