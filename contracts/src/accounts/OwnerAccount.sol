@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: CC0-1.0
 pragma solidity ^0.8.30;
 
+import {FrameTxLib} from "../frame/FrameTxLib.sol";
+
 /// @title  OwnerAccount
 /// @author taek <leekt216@gmail.com>
 /// @notice The canonical single-owner EIP-8141 smart account.
@@ -31,54 +33,36 @@ contract OwnerAccount {
     ///         transaction (and unrolls any APPROVE), so `revert(0, 0)` is the
     ///         correct and only rejection path -- there is no "return false".
     function validate() external {
-        address currentOwner = owner;
+        // `sigSigner(0)` is the address the protocol already recovered and
+        // checked -- a verified fact, not a recovery. An ARBITRARY entry has no
+        // resolved signer and halts here, which is a fine outcome: this account
+        // only accepts protocol-verified schemes. Checking the scheme explicitly
+        // is unnecessary -- a P256 entry resolves to keccak256(qx || qy)[12:],
+        // so matching a chosen 20-byte owner with a P256 key is as hard as
+        // matching it with a secp256k1 key.
+        //
+        // `signedThisTx(0)` is `sigMsg(0) == 0`: the entry signed the canonical
+        // transaction signature hash rather than some other digest the owner
+        // signed at some other time, for some other purpose. Accepting a
+        // non-zero `msg` would turn any stray off-chain signature into a blank
+        // cheque; this check is the replay protection.
+        //
+        // A revert in a VERIFY frame invalidates the whole transaction -- there
+        // is no "return false".
+        if (FrameTxLib.sigSigner(0) != owner || !FrameTxLib.signedThisTx(0)) revert();
 
-        assembly ("memory-safe") {
-            // SIGPARAM stack layout is `signatureIndex` on TOP, `param` below it.
-            // Yul pushes its first argument last, so the first argument is the
-            // top-of-stack operand: sigparam(signatureIndex, param).
-
-            // param 0x00 -> resolved_signer of signature 0.
-            //
-            // This is the address the protocol already recovered and checked. We
-            // are not recovering anything; we are reading a verified fact. An
-            // ARBITRARY entry has no resolved signer and halts here, which is a
-            // fine outcome: this account only accepts protocol-verified schemes.
-            // Checking `scheme` explicitly is unnecessary -- a P256 entry resolves
-            // to keccak256(qx || qy)[12:], so matching a chosen 20-byte owner with
-            // a P256 key is as hard as matching it with a secp256k1 key.
-            let signer := sigparam(0, 0x00)
-
-            // param 0x02 -> the signature entry's `msg` field.
-            //
-            // Zero means the entry signed the canonical transaction signature
-            // hash, TXPARAM 0x08 (the spec reserves the zero value for exactly
-            // this, since the explicit zero digest is invalid). A non-zero `msg`
-            // is some other digest the owner signed at some other time, for some
-            // other purpose -- accepting it would turn any stray off-chain
-            // signature into a blank cheque. This check is what binds the
-            // approval to THIS transaction; without it there is no replay
-            // protection at all.
-            let signedThisTx := iszero(sigparam(0, 0x02))
-
-            if iszero(and(eq(signer, currentOwner), signedThisTx)) { revert(0, 0) }
-
-            // APPROVE stack layout is `offset`, `length`, `scope` from the top, so
-            // Yul order is approvetx(offset, length, scope). It exits the frame
-            // successfully, exactly like RETURN, with memory [offset, offset+length)
-            // as return data -- here, no return data.
-            //
-            // scope 0x3 = APPROVE_EXECUTION_AND_PAYMENT: this account both
-            // authorises later SENDER frames to act as it, and agrees to pay the
-            // transaction's max_cost. The requested scope must be a subset of
-            // `frame.flags & 0x3`, so the frame MUST carry flags 0x3; and the
-            // protocol only allows flags containing APPROVE_EXECUTION when the
-            // frame target is `tx.sender`. Consequence worth internalising: this
-            // account can never be tricked into paying for a stranger's
-            // transaction, because a frame it does not own cannot legally carry
-            // the flags this call requires.
-            approvetx(0, 0, 3)
-        }
+        // SCOPE_BOTH: this account both authorises later SENDER frames to act
+        // as it, and agrees to pay the transaction's max_cost. The requested
+        // scope must be a subset of `frame.flags & 0x3`, so the frame MUST
+        // carry flags 0x3; and the protocol only allows flags containing
+        // APPROVE_EXECUTION when the frame target is `tx.sender`. Consequence
+        // worth internalising: this account can never be tricked into paying
+        // for a stranger's transaction, because a frame it does not own cannot
+        // legally carry the flags this call requires.
+        //
+        // APPROVE exits the frame successfully, exactly like RETURN: nothing
+        // after this line executes.
+        FrameTxLib.approve(FrameTxLib.SCOPE_BOTH);
     }
 
     /// @notice Read-only tour of the introspection surface. Not used by `validate`;
@@ -97,15 +81,11 @@ contract OwnerAccount {
         view
         returns (bytes32 sigHash, uint256 frameIndex, uint256 flags, uint256 mode, address signer0)
     {
-        assembly ("memory-safe") {
-            sigHash := txparam(0x08)
-            frameIndex := txparam(0x0a)
-            // FRAMEPARAM takes `frameIndex` on top, `param` below:
-            // frameparam(frameIndex, param).
-            flags := frameparam(frameIndex, 0x03)
-            mode := frameparam(frameIndex, 0x02)
-            signer0 := sigparam(0, 0x00)
-        }
+        sigHash = FrameTxLib.sigHash();
+        frameIndex = FrameTxLib.currentFrameIndex();
+        flags = FrameTxLib.frameFlags(frameIndex);
+        mode = FrameTxLib.frameMode(frameIndex);
+        signer0 = FrameTxLib.sigSigner(0);
     }
 
     /// @notice Rotate the owner.

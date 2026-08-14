@@ -4,14 +4,16 @@ The canonical EIP-8141 account: one owner key in storage, one validation functio
 no signature verification code at all.
 
 `OwnerAccount.validate()` is what the `ENTRY_POINT` calls for the `VERIFY` frame. It does
-exactly two reads and one approval:
+exactly two reads and one approval, through [`FrameTxLib`](07-frametx-library.md):
 
 ```solidity
-let signer := sigparam(0, 0x00)                 // who signed signature 0
-let signedThisTx := iszero(sigparam(0, 0x02))   // ...over THIS transaction's sig hash
-if iszero(and(eq(signer, currentOwner), signedThisTx)) { revert(0, 0) }
-approvetx(0, 0, 3)                              // APPROVE_EXECUTION_AND_PAYMENT
+if (FrameTxLib.sigSigner(0) != owner || !FrameTxLib.signedThisTx(0)) revert();
+FrameTxLib.approve(FrameTxLib.SCOPE_BOTH);      // APPROVE_EXECUTION_AND_PAYMENT
 ```
+
+The library is `internal`, so this inlines to the bare opcodes — `sigparam(0, 0x00)` for
+the signer, `sigparam(0, 0x02)` for the `msg` field, `approvetx(0, 0, 3)` — with no
+dispatch or linking; the disassembly below shows exactly that.
 
 The protocol verified the secp256k1 (or P256) signature against the canonical signature
 hash **before frame 0 ran**. `SIGPARAM` hands the account the already-verified result. The
@@ -57,26 +59,27 @@ No frame ever calls an `execute()` function on the account: in `SENDER` mode the
 
 Compiles with zero errors (one unavoidable warning that this is a pre-release compiler).
 
-Runtime bytecode — **530 bytes** (421 bytes of code + 109 bytes of CBOR metadata; the
-metadata is fat because the nightly version string is embedded):
+Runtime bytecode — **435 bytes** (`--no-cbor-metadata`, so no trailing metadata; the
+current bytes live in `out-frame/OwnerAccount/OwnerAccount.bin-runtime`).
 
-```
-608060405260043610610041575f3560e01c806313af40351461004c5780636901f6681461006d5780638da5cb5b14610081578063de3abbac146100bc575f5ffd5b3661004857005b5f5ffd5b348015610057575f5ffd5b5061006b610066366004610177565b610109565b005b348015610078575f5ffd5b5061006b61014a565b34801561008c575f5ffd5b505f5461009f906001600160a01b031681565b6040516001600160a01b0390911681526020015b60405180910390f35b3480156100c7575f5ffd5b50604080516008b08152600ab060208201819052600381b39282019290925260029091b360608201526001600160a01b035f80b416608082015260a0016100b3565b333014610129576040516314e1dbf760e11b815260040160405180910390fd5b5f80546001600160a01b0319166001600160a01b0392909216919091179055565b5f80546001600160a01b0316908080b490600290b415818314811661016d575f5ffd5b505060035f5faa50565b5f60208284031215610187575f5ffd5b81356001600160a01b038116811461019d575f5ffd5b939250505056
-```
-
-`validate()`'s body is 43 bytes of the above (`5f8054…aa50`), dispatch excluded:
+`validate()`'s body is 60 bytes of it (`5f8054…aa`), dispatch excluded — note there is no
+trace of `FrameTxLib` left, just the opcodes:
 
 ```
 5f 80 54              PUSH0 DUP1 SLOAD              owner, from slot 0
 6001600160a01b0316    PUSH1 1 PUSH1 1 PUSH1 a0 SHL SUB AND   the usual address mask
-90 80 80 b4           SWAP1 DUP1 DUP1 SIGPARAM      sigparam(0, 0x00) -> resolved signer
-90 6002 90 b4         SWAP1 PUSH1 2 SWAP1 SIGPARAM  sigparam(0, 0x02) -> msg
-15 81 83 14 81 16     ISZERO … EQ … AND             and(eq(signer, owner), iszero(msg))
-61016d 57             PUSH2 016d JUMPI              take the approval path if both hold
+90 80 b4              SWAP1 DUP1 SIGPARAM           sigparam(0, 0x00) -> resolved signer
+6001600160a01b0316    (mask again)
+14 15 80              EQ ISZERO DUP1                signer != owner
+610171 57             PUSH2 0171 JUMPI              short-circuit the || on mismatch
+50 6002 5f b4         POP PUSH1 2 PUSH0 SIGPARAM    sigparam(0, 0x02) -> msg
+15 15                 ISZERO ISZERO                 msg != 0
+5b 15                 JUMPDEST ISZERO               either failure flag, inverted
+61017a 57             PUSH2 017a JUMPI              take the approval path if ok
 5f 5f fd              PUSH0 PUSH0 REVERT            …otherwise kill the transaction
-5b 50 50              JUMPDEST POP POP
-6003 5f 5f aa         PUSH1 3 PUSH0 PUSH0 APPROVE   approvetx(offset=0, length=0, scope=3)
-50                    POP                           unreachable; APPROVE halts the frame
+5b 610184             JUMPDEST PUSH2 0184
+6003 80 5f 5f aa      PUSH1 3 DUP1 PUSH0 PUSH0 APPROVE   approvetx(offset=0, length=0, scope=3)
+5b 56                 unreachable; APPROVE halts the frame
 ```
 
 Note the push order at the end: `scope` is pushed first because it is deepest on the
@@ -151,8 +154,8 @@ Here the protocol does all of it before any EVM code runs:
 - fee collection, via `APPROVE` setting `payer` and pulling `max_cost`.
 
 What is left for the account is a two-term boolean: *the resolved signer is my owner* and
-*it signed this transaction's hash*. 421 bytes of code, most of which is ABI dispatch and
-the `owner()`/`setOwner`/`frameContext()` accessors — `validate()`'s body is 43 bytes.
+*it signed this transaction's hash*. 435 bytes of code, most of which is ABI dispatch and
+the `owner()`/`setOwner`/`frameContext()` accessors — `validate()`'s body is 60 bytes.
 
 The corollary is that an account cannot get signature verification wrong any more. It can
 still get *policy* wrong; skipping the `msg` check below is the interesting way to do that.
