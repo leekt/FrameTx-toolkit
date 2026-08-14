@@ -8,7 +8,7 @@ spec revision can be diffed against a known baseline rather than guessed at.
 | **EIP-8141 spec** | `064f49621d05ce25323def867a6a2ed9275d3570` | 2026-08-11 | [ethereum/EIPs](https://github.com/ethereum/EIPs) — `EIPS/eip-8141.md` |
 | **revm** | `ce7886e` | 2026-08-13 | [leekt/revm](https://github.com/leekt/revm) — branch `feat/eip8141-frame-opcodes` |
 | **foundry** | `9a2aa86` | 2026-08-14 | [leekt/foundry](https://github.com/leekt/foundry) — branch `feat/eip8141-frame-opcodes` |
-| **solidity** | `9daabdb8d7b85777dac402796e3149d50a06be7c` | 2026-08-12 | [leekt/solidity](https://github.com/leekt/solidity) — branch `feat/eip8141-frame-opcodes` |
+| **solidity** | `70c3af1c1fb201fa97f47d92d375ea28931b944c` | 2026-08-14 | [leekt/solidity](https://github.com/leekt/solidity) — branch `feat/eip8141-frame-opcodes` |
 
 The spec text as of that commit is vendored at [`spec/EIP8141.md`](spec/EIP8141.md),
 so the toolkit is self-contained and the diff is always available locally.
@@ -46,7 +46,7 @@ These are deliberate.
 | Divergence | Why |
 |---|---|
 | The `APPROVE` opcode is spelled `approvetx` in Solidity and Yul | `approve` is the ERC-20 method name; reserving it as a compiler builtin would break a large share of existing contracts. The opcode byte `0xaa` is unchanged. |
-| `SIGPARAM`'s 5-operand copy form is not a named builtin | Its stack arity depends on a runtime operand value, which no fixed-arity instruction model can express — solc and revm both declare arity as a constant. See [the upstream note](guides/03-limitations.md#why-this-is-worth-raising-upstream). Reachable via `verbatim_5i_0o(hex"b4", ...)`. |
+| `SIGPARAM`'s 5-operand copy form has its own builtin, `sigdatacopy` | Its stack arity depends on a runtime operand value, which no fixed-arity instruction model can express — solc and revm both declare arity as a constant. The solc fork works around it with a dedicated `sigdatacopy(signatureIndex, memOffset, dataOffset, length)` builtin that hardcodes the param, usable from inline assembly. The opcode-level objection still stands — see [the upstream note](guides/03-limitations.md#why-this-is-worth-raising-upstream). |
 | The frame context is a thread-local, not part of `TxEnv` | Putting it on shared revm types broke unrelated crates. A host that models frame transactions natively overrides `Host::frame_context()` and ignores the slot. |
 | Per-frame receipts not exposed over RPC | anvil executes frame transactions and mines them, but the `[status, gas_used, logs]` sub-receipts are not yet queryable. |
 

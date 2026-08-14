@@ -54,8 +54,10 @@ allowed_scope · `0x07` atomic_batch · `0x08` value.
 
 > `SIGPARAM` param `0x04` takes **five** operands and returns none, unlike the others.
 > solc's instruction model is fixed-arity and cannot express an operand-dependent stack
-> effect, so it is not exposed as a builtin. Use `verbatim_5i_0o(hex"b4", sigIdx, 4,
-> memOffset, dataOffset, length)` in standalone Yul.
+> effect, so the copy form is a separate builtin on the fork:
+> `sigdatacopy(sigIdx, memOffset, dataOffset, length)`, usable in inline assembly and
+> standalone Yul alike. On **stock** solc, standalone Yul can still use
+> `verbatim_5i_0o(hex"b4", sigIdx, 4, memOffset, dataOffset, length)`.
 
 ## APPROVE scopes
 

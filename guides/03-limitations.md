@@ -32,12 +32,18 @@ only the mnemonic differs.
 `approve` remains usable as an ordinary identifier, even on `@future`. There is a regression
 test pinning that: `test/libyul/yulSyntaxTests/frame_transaction_approve_never_reserved.yul`.
 
-### `SIGPARAM`'s copy form is not a named builtin
+### `SIGPARAM`'s copy form needs its own builtin
 
 `SIGPARAM` has an operand-dependent stack effect: params `0x00`–`0x03` take 2 operands and
 return 1, while param `0x04` takes 5 and returns none. Solidity's `InstructionInfo` is
-fixed-arity and cannot express that, so only the metadata form is a builtin. The copy form
-is reachable via `verbatim_5i_0o(hex"b4", ...)` in standalone Yul.
+fixed-arity and cannot express that, so only the metadata form is the `sigparam` builtin.
+
+The copy form is exposed as a separate builtin,
+`sigdatacopy(signatureIndex, memOffset, dataOffset, length)`, which hardcodes the param and
+emits `PUSH1 0x04 SWAP1 SIGPARAM`. Unlike the earlier `verbatim_5i_0o(hex"b4", ...)`
+workaround, it works in inline assembly, where `verbatim` is unavailable, and it carries
+precise side-effect and view/pure metadata instead of verbatim's worst-case assumptions.
+The split is exactly what the suggested opcode fix below would make unnecessary.
 
 ### Why this is worth raising upstream
 
