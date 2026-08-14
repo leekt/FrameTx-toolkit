@@ -54,7 +54,7 @@ These are deliberate.
 
 | Suite | Result |
 |---|---|
-| `contracts/` — `forge test` | 53 passed, 0 failed |
+| `contracts/` — `forge test` | 63 passed, 0 failed |
 | `foundry` — anvil frame tx integration | 11 passed, 0 failed |
 | `foundry` — envelope unit tests | 17 passed, 0 failed |
 | `revm` — `cargo test --workspace --lib` | 0 failures, clean with `--all-features` |

@@ -33,7 +33,8 @@ rm -f /tmp/.frame_probe.sol
 mkdir -p "$OUT"
 shopt -s nullglob
 found=0
-for sol in "$(dirname "${BASH_SOURCE[0]}")/../src/accounts"/*.sol; do
+for sol in "$(dirname "${BASH_SOURCE[0]}")/../src/accounts"/*.sol \
+           "$(dirname "${BASH_SOURCE[0]}")/../src/frame"/*.sol; do
     name="$(basename "$sol" .sol)"
     echo "compiling $name"
     # --no-cbor-metadata keeps the output reproducible: the CBOR blob encodes the

@@ -59,6 +59,11 @@ allowed_scope · `0x07` atomic_batch · `0x08` value.
 > standalone Yul alike. On **stock** solc, standalone Yul can still use
 > `verbatim_5i_0o(hex"b4", sigIdx, 4, memOffset, dataOffset, length)`.
 
+Rather than remembering operand orders, Solidity accounts can use
+[`contracts/src/frame/FrameTxLib.sol`](../contracts/src/frame/FrameTxLib.sol), which wraps
+every introspection param and `APPROVE` in a typed internal function — see
+[contracts/docs/07](../contracts/docs/07-frametx-library.md).
+
 ## APPROVE scopes
 
 | Scope | Meaning | Requires |

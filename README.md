@@ -10,7 +10,7 @@ baseline rather than guessed at.
 
 ```bash
 git clone --recurse-submodules https://github.com/leekt/FrameTx-toolkit.git
-cd FrameTx-toolkit/contracts && forge test        # 53 tests
+cd FrameTx-toolkit/contracts && forge test        # 63 tests
 ```
 
 ## What EIP-8141 changes

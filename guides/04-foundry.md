@@ -15,7 +15,7 @@ opcodes and patches Foundry to use that fork.
 | revm executes the six opcodes | **Done** — 8 behavioural tests |
 | `forge` built against the patched revm | **Done** — every revm crate resolves to the fork |
 | `setFrameTx` / `clearFrameTx` cheatcodes | **Done** |
-| `forge test` executing frame accounts | **Done** — 53 tests in `contracts/` |
+| `forge test` executing frame accounts | **Done** — 63 tests in `contracts/` |
 | anvil accepting type `0x06` transactions | **Done** — decode, validate, execute; 11 integration tests |
 | Atomic batches and default code in anvil | **Done** — terminator rollback, mid-batch skip, signature-index selection all pinned |
 | Per-frame receipts over RPC | Not exposed yet |
