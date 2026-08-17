@@ -1,45 +1,33 @@
 # Building the toolkit
 
-Two components: a patched **Foundry** (whose revm executes the frame opcodes) and a patched
-**solc** that compiles contracts using them. Build both; the tests need both.
+The stack has three source components: patched **solc**, patched **revm**, and **Foundry**
+built against that revm. solc produces the account artifacts; the patched Forge executes
+them. Artifact generation must happen before `forge test`.
 
-## Clone with submodules
+## Reproducibility
+
+The root gitlinks, Foundry's twelve REVM manifest patches, and `Cargo.lock` record the exact
+published commits in [VERSIONS.md](../VERSIONS.md). Follow the build order below from a fresh
+clone; generated `contracts/out-frame` artifacts are intentionally not checked in.
+
+Clone and initialize the recorded stack:
 
 ```bash
 git clone --recurse-submodules https://github.com/leekt/FrameTx-toolkit.git
 cd FrameTx-toolkit
 ```
 
-Already cloned without `--recurse-submodules`:
+For an existing clone:
 
 ```bash
 git submodule update --init --recursive
 ```
 
-Both submodules are pinned to exact commits (see [VERSIONS.md](../VERSIONS.md)). That is
-deliberate — `git submodule update` restores the tested combination.
+The sequence below is the required build order.
 
-## Foundry
+## 1. Build solc
 
-Rust toolchain. A cold build takes roughly 15 minutes.
-
-```bash
-cd foundry
-cargo build --bin forge --release
-```
-
-The binary lands at `foundry/target/release/forge`. Use that one -- a
-stock `forge` cannot execute the frame opcodes.
-
-```bash
-cd ../contracts
-SOLC=../solidity/build/solc/solc ./script/build-frame-accounts.sh
-../foundry/target/release/forge test        # 53 tests
-```
-
-## solc
-
-Needs CMake ≥3.21, a C++20 compiler, and Boost ≥1.83.
+solc needs CMake >=3.21, a C++20 compiler, and Boost >=1.83.
 
 ```bash
 # macOS
@@ -49,49 +37,113 @@ brew install boost cmake ninja ccache
 sudo apt-get install -y build-essential cmake ninja-build ccache libboost-all-dev
 ```
 
+From the repository root:
+
 ```bash
-cd solidity
-cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+cmake -S solidity -B solidity/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-cmake --build build --target solc -j "$(nproc 2>/dev/null || sysctl -n hw.ncpu)"
+cmake --build solidity/build --target solc \
+      -j "$(nproc 2>/dev/null || sysctl -n hw.ncpu)"
 ```
 
-The binary lands at `solidity/build/solc/solc`. A cold build takes roughly 10–20 minutes.
-
-Verify it has the new opcodes:
+The binary lands at `solidity/build/solc/solc`. Verify the tooling-fixture builtins before
+using its output:
 
 ```bash
-cat > /tmp/t.sol <<'EOF'
-contract T { function f() external { assembly { approvetx(0, 0, 3) } } }
+cat > /tmp/frame-probe.sol <<'EOF'
+contract T {
+    function approve() external { assembly { approvetx(0, 0, 3) } }
+    function traceCount() external view returns (uint256 n) { assembly { n := txtrace(0, 0) } }
+    function setDelegate(bytes32 salt, address target) external returns (address location) {
+        assembly { location := setdelegate(salt, target) }
+    }
+    function setSelfDelegate(address target) external returns (bool success) {
+        assembly { success := setselfdelegate(target) }
+    }
+}
 EOF
-solidity/build/solc/solc --experimental --evm-version @future --bin /tmp/t.sol
+solidity/build/solc/solc --experimental --evm-version @future \
+    --bin /tmp/frame-probe.sol
+rm -f /tmp/frame-probe.sol
 ```
 
-Compiles → the fork works. `Function "approvetx" not found` → you built stock solc.
+Successful compilation identifies the current tooling compiler. A missing `approvetx`
+identifies stock solc; a missing `txtrace`, `setdelegate`, or `setselfdelegate` can identify an
+older submodule state. The build script below performs the two Frame-fixture checks
+automatically.
 
-### Why `--experimental --evm-version @future`
+## 2. Generate account artifacts
 
-EIP-8141 is a draft with no assigned hard fork, so the opcodes are gated behind solc's
-existing experimental `@future` EVM version. That flag combination is upstream behaviour,
-not something this fork added: `@future` always requires `--experimental`.
-
-Without the flags the opcodes do not exist, and their names stay free for ordinary use —
-which is the point of gating them.
-
-## Optional: solc's own test suite
+Foundry cannot compile the frame contracts because its EVM-version enum rejects `@future`
+and it has no passthrough for solc's `--experimental` flag. Generate the artifacts directly
+with patched solc:
 
 ```bash
-cd solidity
-cmake --build build --target isoltest -j 8
-./build/test/tools/isoltest --testpath test --no-semantic-tests --no-color < /dev/null
+cd contracts
+SOLC=../solidity/build/solc/solc ./script/build-frame-accounts.sh
 ```
 
-Semantic tests need `libevmone`, which is not required for anything here.
+This writes metadata-free ABI, creation-bytecode, and runtime-bytecode files under
+`contracts/out-frame/<Name>/`. The directory is ignored build output and is absent in a
+fresh checkout. Tests read it at runtime, so skipping this step produces missing or stale
+artifact failures rather than compiling the contracts on demand.
 
-To run the EIP-8141 tests specifically (they are skipped by default because they require
-`@future`):
+## 3. Build Foundry against patched revm
+
+Foundry's manifest and lockfile pin all twelve REVM crates to the published toolkit revision:
 
 ```bash
-./build/test/tools/isoltest --testpath test --no-semantic-tests --no-color \
-    --evm-version @future -t "syntaxTests/inlineAssembly/frame_transaction*" < /dev/null
+cd ../foundry
+cargo build --locked --bin forge --bin anvil
+# Optional release binary:
+cargo build --locked --bin forge --bin anvil --release
 ```
+
+The binaries land under `foundry/target/{debug,release}/` as `forge` and `anvil`.
+
+## 4. Run the contract tests
+
+After building Forge, return to `contracts/` (whose artifacts were generated in step 2):
+
+```bash
+cd ../contracts
+../foundry/target/debug/forge test
+# Or use the release binary:
+../foundry/target/release/forge test
+```
+
+Stock Forge cannot execute these tests: its revm treats `0xaa` and `0xb0`-`0xb9` as invalid
+opcodes and does not implement the frame-context cheatcodes.
+
+## Why `--experimental --evm-version @future`
+
+The Frame profile, EIP-7819, EIP-7851, and EIP-8151 have no assigned compiler hard fork, so
+their compiler behavior is gated behind solc's existing experimental `@future` EVM version.
+`@future` always requires `--experimental`. Without those flags, the opcode names remain
+available as ordinary identifiers and high-level `ecrecover` remains `pure`; at `@future`,
+EIP-8151 makes it `view`. Anvil separately requires `--enable-eip7819`, `--enable-eip7851`, or
+`--enable-eip8151` and Prague-or-later rules; selecting `@future` in solc does not activate the
+node. EIP-7851's upstream opcode is still TBD, so this toolkit provisionally and
+non-normatively uses `0xf7`.
+
+## Optional solc tests
+
+From the repository root:
+
+```bash
+cmake --build solidity/build --target isoltest -j 8
+solidity/build/test/tools/isoltest --testpath solidity/test \
+    --no-semantic-tests --no-smt --no-color < /dev/null
+```
+
+Semantic tests need `libevmone`, which is not required by the toolkit. To run only the
+frame-opcode syntax tests under `@future`:
+
+```bash
+solidity/build/test/tools/isoltest --testpath solidity/test \
+    --no-semantic-tests --no-smt --no-color --evm-version @future \
+    -t "syntaxTests/inlineAssembly/frame_transaction*" < /dev/null
+```
+
+EIP-8151's SMT fixtures require a build with Z3 or cvc5. They are skipped rather than treated
+as passing when no solver is configured.

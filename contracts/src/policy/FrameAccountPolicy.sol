@@ -8,9 +8,9 @@ pragma solidity ^0.8.24;
 ///
 /// EIP-8141 splits an account cleanly in two:
 ///
-///  1. The protocol verifies every `SECP256K1`/`P256` signature in the envelope
-///     against the canonical signature hash *before* any frame runs. The account
-///     never touches elliptic curves.
+///  1. Before any frame runs, the protocol verifies every `SECP256K1`/`P256`
+///     signature against either the canonical transaction hash (empty `msg`) or
+///     the entry's explicit digest. The account never touches elliptic curves.
 ///  2. The account is left with a policy question: given the set of keys that
 ///     provably signed, and the frames about to execute, should this transaction
 ///     be approved?
@@ -18,7 +18,7 @@ pragma solidity ^0.8.24;
 /// (2) is ordinary Solidity. It is where the bugs live, and it is what this
 /// library contains. The frame glue that feeds it -- `sigparam` to learn the
 /// signers, `frameparam` to inspect the frames, `approvetx` to approve -- is a
-/// handful of lines and is exercised against a real EVM in the Go harness.
+/// handful of lines and is exercised against patched revm by the account tests.
 library FrameAccountPolicy {
     /// @notice A session key may only call allowlisted targets, and may not move value.
     struct SessionKey {
@@ -98,7 +98,7 @@ library FrameAccountPolicy {
     }
 
     /// @notice Extracts the 4-byte selector from the first word of a frame's data.
-    /// @dev `framedataload(i, 0)` yields a 32-byte word with the selector in its
+    /// @dev `framedataload(0, i)` yields a 32-byte word with the selector in its
     /// most significant bytes, so it must be shifted down by 224 bits. Frames
     /// carrying fewer than 4 bytes of data are zero-extended by the opcode, which
     /// is why `dataLen` is taken separately rather than inferred.

@@ -8,18 +8,20 @@ signature blob, and no per-signer offsets**.
 
 ## What it does
 
-The protocol validates every `SECP256K1` / `P256` entry in the transaction envelope against
-the canonical signature hash *before* any frame runs. If one is invalid the transaction is
-invalid and this code never executes. So the account's entire job is:
+The protocol validates every `SECP256K1` / `P256` entry against its selected message before
+any frame runs. If one is invalid the transaction is invalid and this code never executes.
+The account then counts only entries whose selected message is the canonical transaction
+hash. Its entire job is:
 
-1. `TXPARAM(0x0B)` → how many signature entries does this transaction carry?
+1. `FrameTxLib.signatureCount()` (`TXPARAM 0x0B`) → how many signature entries does this
+   transaction carry?
 2. For each entry `i`:
-   - `SIGPARAM(i, 0x01)` → `scheme`. Skip anything that is not `SECP256K1`.
-   - `SIGPARAM(i, 0x02)` → `msg`. Skip unless it is `0`, meaning "signed over
+   - `FrameTxLib.sigScheme(i)` → `scheme`. Skip anything that is not `SECP256K1`.
+   - `FrameTxLib.signedThisTx(i)` → whether `msg` is `0`, meaning "signed over
      `compute_sig_hash(tx)`", i.e. over *this* transaction.
-   - `SIGPARAM(i, 0x00)` → `resolved_signer`. Skip unless it is a stored owner.
+   - `FrameTxLib.sigSigner(i)` → `resolved_signer`. Skip unless it is a stored owner.
    - Require it to be strictly greater than the previously counted signer (dedup, below).
-3. If the count reaches `threshold`, `APPROVE`.
+3. If the count reaches `threshold`, call `FrameTxLib.approve(...)`.
 
 Order matters in step 2: **read `scheme` before `resolved_signer`**. Requesting
 `resolved_signer` of an `ARBITRARY` entry is an *exceptional halt*, not a revert — it burns
@@ -95,7 +97,8 @@ With a paymaster instead of self-relay (`only_verify` + `pay` prefix):
 | 2 | `SENDER` (2) | `0x0` | … | the user operation |
 
 The same deployed bytecode serves both: `validate()` approves whatever the *current* frame's
-flags allow, via `FRAMEPARAM(TXPARAM(0x0A), 0x06)` (`allowed_scope` of the executing frame).
+flags allow, via `FrameTxLib.frameAllowedScope(FrameTxLib.currentFrameIndex())`
+(`FRAMEPARAM(TXPARAM(0x0A), 0x06)` at the opcode level).
 `APPROVE` reverts on a scope that is not a subset of `flags & 0x3`, so echoing the flags back
 never grants more than the transaction asked for. The one frame where it does not work is a
 frame with `flags & 0x3 == 0`: `APPROVE` also rejects scope `0`, so there `validate()` reverts
@@ -137,40 +140,32 @@ signature metadata are inside the hash the owners signed.
 | 0 | `mapping(address => bool) isOwner` — owner flag at `keccak256(abi.encode(owner, 0))` |
 | 1 | `uint256 threshold` |
 
-Useful when seeding the account with `Storage:` in the Go test harness. Selectors:
+The constructor-backed Foundry tests exercise this layout directly. Selectors:
 `validate()` `0x6901f668`, `isOwner(address)` `0x2f54bf6e`, `threshold()` `0x42cde4e8`.
 
 ## Compiling
 
 ```bash
-/Users/taek/worksapce/solidity/build/solc/solc --experimental --evm-version @future \
-    --bin-runtime --optimize --no-cbor-metadata MultisigAccount.sol
+cd contracts
+SOLC=../solidity/build/solc/solc ./script/build-frame-accounts.sh
 ```
 
-Run from this directory. Output is clean — the only diagnostic is the standard pre-release
-compiler warning.
-
-Runtime bytecode, **582 bytes** (1164 hex characters, metadata included):
-
-```text
-608060405234801561000f575f5ffd5b506004361061003f575f3560e01c80632f54bf6e1461004357806342cde4e81461007a5780636901f66814610091575b5f5ffd5b6100656100513660046101ab565b5f6020819052908152604090205460ff1681565b60405190151581526020015b60405180910390f35b61008360015481565b604051908152602001610071565b61009961009b565b005b600bb05f80805b838110156101565760018082b49081146100bc575061014e565b600282b480156100cd57505061014e565b6001600160a01b035f8085b491821681526020819052604090205460ff166100f75750505061014e565b8481116101435760405162461bcd60e51b81526020600482015260156024820152741bdddb995c881cda59dcc81b9bdd081cdbdc9d1959605a1b60448201526064015b60405180910390fd5b600190950194935050505b6001016100a2565b5060015482101561019d5760405162461bcd60e51b81526020600482015260116024820152701d1a1c995cda1bdb19081b9bdd081b595d607a1b604482015260640161013a565b6006600ab0b35f5faa505050565b5f602082840312156101bb575f5ffd5b81356001600160a01b03811681146101d1575f5ffd5b939250505056
-```
-
-The last 109 bytes are the CBOR metadata trailer and encode the exact compiler build
-(`0.8.37-develop.2026.8.12+commit.3604bc1e.mod`), so they will differ if you rebuild solc;
-the 473 bytes of code before it are what matters.
+The current generated runtime is **463 bytes** (926 hex characters) at
+`out-frame/MultisigAccount/MultisigAccount.bin-runtime`. It was generated with
+`--no-cbor-metadata`; all 463 bytes are runtime code and there is no metadata trailer.
 
 Operand order is visible in the output if you want to confirm it: `600b b0` is
 `TXPARAM(0x0B)`; `6001 80 82 b4` is `SIGPARAM` with the index on top and `param = 0x01`
 below; `6006 600a b0 b3` is `FRAMEPARAM(TXPARAM(0x0A), 0x06)`; and the tail `5f 5f aa` is
 `approvetx(0, 0, scope)` with `offset` on top.
 
-## Not verified here
+## Verification scope
 
-The account is compile-verified only. There is no txpool or RPC path for frame transactions
-(see `guides/03-limitations.md`), so an end-to-end run means a Go test alongside
-`go-ethereum/core/eip8141_test.go`, which is outside this directory. Nothing in this README
-claims an on-chain execution that was not run.
+`test/MultisigAccount.t.sol` installs this exact generated runtime and executes its positive
+and negative policy paths against the real opcodes in patched revm. The tests cover threshold
+approval, ordering/dedup, foreign and arbitrary entries, explicit digests, P256 exclusion,
+scope derivation, and `APPROVE_NONE`. Anvil's raw-RPC path is tested separately with simpler
+accounts; this specific multisig has not been submitted over raw RPC.
 
 ## Spec points that are unclear or worth flagging
 

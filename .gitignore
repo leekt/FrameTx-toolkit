@@ -1,4 +1,3 @@
 # Build outputs of the submodules
-go-ethereum/build/
 solidity/build/
 contracts/out-frame/

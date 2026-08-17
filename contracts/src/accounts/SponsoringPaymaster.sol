@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.30;
+
+import {FrameTxLib} from "../frame/FrameTxLib.sol";
 
 /// @title SponsoringPaymaster
 /// @author taek <leekt216@gmail.com>
@@ -9,12 +11,12 @@ pragma solidity ^0.8.20;
 /// This contract is the target of a `pay` frame -- VERIFY mode with
 /// flags == 0x1 (APPROVE_PAYMENT only). It must come AFTER the sender's
 /// `only_verify` frame, because APPROVE(APPROVE_PAYMENT) reverts unless
-/// `sender_approved` is already true. See README.md for the frame table.
+/// `sender_approved` is already true. See `contracts/docs/06-paymaster.md`.
 ///
-/// The central idea: the protocol has ALREADY verified every secp256k1/P256
-/// signature in `tx.signatures` against the canonical signature hash before any
-/// frame runs. So this contract does no ecrecover. It asks SIGPARAM *which key*
-/// signed, and decides whether it trusts that key.
+/// The central idea: before any frame runs, the protocol has ALREADY verified
+/// every secp256k1/P256 signature against its selected message. This contract
+/// does no ecrecover; it asks SIGPARAM which key signed, requires the canonical
+/// transaction-hash case, and decides whether it trusts that key.
 contract SponsoringPaymaster {
     /// @notice Can withdraw the sponsorship balance.
     address public immutable owner;
@@ -24,25 +26,12 @@ contract SponsoringPaymaster {
     ///      validation rules reject a validation-prefix frame that "reads
     ///      storage outside tx.sender", and an immutable is baked into the
     ///      runtime code, so reading it is not an SLOAD. Rotating the key means
-    ///      redeploying. See README "Mempool caveats".
+    ///      redeploying. See `contracts/docs/06-paymaster.md`, "Mempool caveats".
     address public immutable sponsorSigner;
 
     /// @notice Refuse to sponsor a transaction whose TXPARAM(0x06) max cost
     ///         exceeds this, in wei.
     uint256 public immutable maxSponsoredCost;
-
-    // --- SIGPARAM params (spec: SIGPARAM Instruction 0xb4) ---
-    uint256 private constant SIG_SIGNER = 0x00; // resolved_signer
-    uint256 private constant SIG_SCHEME = 0x01; // scheme
-    uint256 private constant SIG_MSG = 0x02; // msg (0 == canonical sig hash)
-
-    uint256 private constant SCHEME_SECP256K1 = 0x1;
-
-    // --- TXPARAM params (spec: TXPARAM Instruction 0xb0) ---
-    uint256 private constant TX_MAX_COST = 0x06;
-
-    // --- APPROVE scopes (spec: Scope Operand) ---
-    uint256 private constant APPROVE_PAYMENT = 0x1;
 
     error NotOwner();
     error WithdrawFailed();
@@ -87,55 +76,38 @@ contract SponsoringPaymaster {
     ///      / SIGPARAM / APPROVE all cause an exceptional halt when the current
     ///      transaction is not a frame transaction.
     function sponsorTransaction(uint256 sigIndex) external {
-        // Operand order for all of these builtins is TOP OF STACK FIRST, which
-        // for SIGPARAM means (signatureIndex, param) -- index first, even
-        // though the spec table lists `param` first as the column header.
-        uint256 scheme;
-        assembly {
-            scheme := sigparam(sigIndex, SIG_SCHEME)
-        }
-        // Check the scheme BEFORE asking for the signer: SIGPARAM(0x00) on an
+        // Check the scheme BEFORE asking for the signer: sigSigner of an
         // ARBITRARY entry is an exceptional halt, not a revert, so it would
         // burn the frame's whole gas limit instead of producing this error.
-        if (scheme != SCHEME_SECP256K1) revert BadScheme(scheme);
-
-        uint256 signer;
-        uint256 sigMsg;
-        uint256 maxCost;
-        assembly {
-            signer := sigparam(sigIndex, SIG_SIGNER)
-            sigMsg := sigparam(sigIndex, SIG_MSG)
-            maxCost := txparam(TX_MAX_COST)
-        }
+        uint256 scheme = FrameTxLib.sigScheme(sigIndex);
+        if (scheme != FrameTxLib.SCHEME_SECP256K1) revert BadScheme(scheme);
 
         // The protocol already checked this signature against the message
         // below. All we decide is whether we trust the key that produced it.
-        if (address(uint160(signer)) != sponsorSigner) {
-            revert NotSponsorSigner(address(uint160(signer)));
-        }
+        address signer = FrameTxLib.sigSigner(sigIndex);
+        if (signer != sponsorSigner) revert NotSponsorSigner(signer);
 
-        // msg == 0 means the entry signs `compute_sig_hash(tx)` -- this exact
-        // transaction, with these frames, this sender and these fees. A
+        // `signedThisTx` means the entry signs `compute_sig_hash(tx)` -- this
+        // exact transaction, with these frames, this sender and these fees. A
         // non-zero msg is an explicit 32-byte digest, i.e. a signature the
         // sponsor made over something else, which a relayer could staple onto
         // an unrelated transaction. Reject it. (The explicit all-zero digest is
         // invalid at the protocol level, so 0 is unambiguous.)
-        if (sigMsg != 0) revert NotCanonicalSigHash();
+        if (!FrameTxLib.signedThisTx(sigIndex)) revert NotCanonicalSigHash();
 
         // Belt and braces: the sig hash already commits to max_fee_per_gas and
         // to every frame's gas_limit, so max_cost is implicitly signed. This
         // cap bounds the damage from a mis-signed or over-generous approval.
+        uint256 maxCost = FrameTxLib.maxCost();
         if (maxCost > maxSponsoredCost) revert CostTooHigh(maxCost);
 
-        // Scope 1 (PAYMENT), not 3: scope 3 additionally approves execution and
-        // is only legal when resolved_target == tx.sender. We are not the
-        // sender. Also, `frame.flags` for a `pay` frame is 0x1, and APPROVE
-        // reverts unless `scope & ~(flags & 0x3) == 0`.
+        // SCOPE_PAYMENT, not SCOPE_BOTH: EXECUTION is only legal when
+        // resolved_target == tx.sender, and we are not the sender. Also,
+        // `frame.flags` for a `pay` frame is 0x1, and APPROVE reverts unless
+        // the scope is a subset of `flags & 0x3`.
         //
         // APPROVE exits the frame like RETURN, with empty return data here, so
         // nothing after this line executes.
-        assembly {
-            approvetx(0, 0, APPROVE_PAYMENT)
-        }
+        FrameTxLib.approve(FrameTxLib.SCOPE_PAYMENT);
     }
 }

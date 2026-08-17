@@ -4,29 +4,28 @@ A third party pays the gas for someone else's transaction. This is the other hal
 account abstraction: example 03/04/05 show an account approving its own *execution*;
 this one shows a different address approving the *payment*.
 
-Source: [`SponsoringPaymaster.sol`](./SponsoringPaymaster.sol)
+Source: [`SponsoringPaymaster.sol`](../src/accounts/SponsoringPaymaster.sol)
 
 ## What it does
 
 The paymaster holds an ETH balance and knows one authorised **sponsor signer** key. When
 its `pay` frame runs it:
 
-1. Reads `SIGPARAM(sigIndex, 0x01)` — the *scheme* of the designated signature entry — and
-   requires `SECP256K1` (`0x1`).
-2. Reads `SIGPARAM(sigIndex, 0x00)` — the *resolved signer* — and requires it to equal
+1. Calls `FrameTxLib.sigScheme(sigIndex)` and requires `SECP256K1` (`0x1`).
+2. Calls `FrameTxLib.sigSigner(sigIndex)` and requires the resolved signer to equal
    `sponsorSigner`.
-3. Reads `SIGPARAM(sigIndex, 0x02)` — the *msg* — and requires it to be `0`, meaning the
-   entry signs `compute_sig_hash(tx)` rather than an explicit digest.
-4. Reads `TXPARAM(0x06)` — the transaction's max cost — and refuses to sponsor above
+3. Calls `FrameTxLib.signedThisTx(sigIndex)` and requires the entry to sign
+   `compute_sig_hash(tx)` rather than an explicit digest.
+4. Calls `FrameTxLib.maxCost()` (`TXPARAM 0x06`) and refuses to sponsor above
    `maxSponsoredCost`.
-5. Calls `APPROVE(offset=0, length=0, scope=1)` — `approvetx(0, 0, 1)`, PAYMENT scope only.
+5. Calls `FrameTxLib.approve(FrameTxLib.SCOPE_PAYMENT)`, PAYMENT scope only.
 
-**It does not run `ecrecover`.** The protocol verifies every `SECP256K1`/`P256` entry in
-`tx.signatures` against the canonical signature hash *before any frame executes* (spec,
-"Behavior": signatures are validated at step 3, frames start after). A frame that reaches
-`SIGPARAM` is therefore looking at metadata that is already proven. The only decision left
-to the contract is **whether it trusts that key** — which is a storage/immutable lookup and
-one comparison, not a signature check.
+**It does not run `ecrecover`.** The protocol verifies every `SECP256K1`/`P256` entry against
+its selected message *before any frame executes* (spec, "Behavior": signatures are validated
+at step 3, frames start after). A frame that reaches `SIGPARAM` is therefore looking at
+metadata that is already proven. The contract decides **whether it trusts that key and
+whether the selected message is the canonical transaction hash**; neither decision repeats
+the cryptography.
 
 Step 3 is the non-obvious one. `msg == 0` is the EVM-visible marker for "this signature is
 over the canonical transaction signature hash". A non-zero `msg` is an explicit 32-byte
@@ -189,17 +188,15 @@ allowance pull, tight expiry) are out of scope here.
 
 ## Compiling
 
-```
-/Users/taek/worksapce/solidity/build/solc/solc --experimental --evm-version @future \
-    --bin-runtime --optimize --no-cbor-metadata SponsoringPaymaster.sol
+```bash
+cd contracts
+SOLC=../solidity/build/solc/solc ./script/build-frame-accounts.sh
 ```
 
 Compiles with **zero errors** (one warning, the standard "this is a pre-release compiler
-version" notice). Runtime bytecode is **977 bytes**:
-
-```
-60806040526004361061004c575f3560e01c8063217de4d814610057578063331987821461007857806374dd1d9c146100be5780638da5cb5b14610109578063f3fef3a31461013c575f5ffd5b3661005357005b5f5ffd5b348015610062575f5ffd5b50610076610071366004610317565b61015b565b005b348015610083575f5ffd5b506100ab7f000000000000000000000000000000000000000000000000000000000000000081565b6040519081526020015b60405180910390f35b3480156100c9575f5ffd5b506100f17f000000000000000000000000000000000000000000000000000000000000000081565b6040516001600160a01b0390911681526020016100b5565b348015610114575f5ffd5b506100f17f000000000000000000000000000000000000000000000000000000000000000081565b348015610147575f5ffd5b5061007661015636600461032e565b610259565b60018082b490811461018857604051630adf80b360e01b8152600481018290526024015b60405180910390fd5b5f82b4600283b46006b07f00000000000000000000000000000000000000000000000000000000000000006001600160a01b03908116908416146101ea57604051631db137d360e21b81526001600160a01b038416600482015260240161017f565b811561020957604051637737da9760e01b815260040160405180910390fd5b7f000000000000000000000000000000000000000000000000000000000000000081111561024d5760405163c8d8b5f760e01b81526004810182905260240161017f565b60015f5faa5050505050565b336001600160a01b037f000000000000000000000000000000000000000000000000000000000000000016146102a2576040516330cd747160e01b815260040160405180910390fd5b5f826001600160a01b0316826040515f6040518083038185875af1925050503d805f81146102eb576040519150601f19603f3d011682016040523d82523d5f602084013e6102f0565b606091505b505090508061031257604051631d42c86760e21b815260040160405180910390fd5b505050565b5f60208284031215610327575f5ffd5b5035919050565b5f5f6040838503121561033f575f5ffd5b82356001600160a01b0381168114610355575f5ffd5b94602093909301359350505056
-```
+version" notice). The current generated runtime is **878 bytes** (1756 hex characters) at
+`out-frame/SponsoringPaymaster/SponsoringPaymaster.bin-runtime`. It was generated with
+`--no-cbor-metadata`, so the size excludes a metadata trailer.
 
 The three `pay`-path opcodes are visible in it:
 

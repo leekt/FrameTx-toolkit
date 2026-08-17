@@ -1,17 +1,18 @@
 # Foundry project
 
-Foundry works here, but only for half the problem. Understanding which half saves
-a lot of confusion.
+The toolkit's patched Foundry executes frame contracts, but patched solc still has
+to compile them separately. Understanding that boundary saves a lot of confusion.
 
 ## What Foundry can and cannot do
 
-| | Policy layer (`src/`) | Frame glue (`../examples/*.sol`) |
+| | Policy layer (`src/policy`) | Frame glue (`src/accounts`, `src/frame`) |
 |---|---|---|
 | `forge build` | Yes | **No** |
-| `forge test` | Yes, including fuzz | **No** |
+| patched `forge test` | Yes, including fuzz | **Yes**, from `out-frame` artifacts |
+| stock `forge test` | Yes | **No**, frame opcodes are invalid |
 | Contains frame opcodes | No | Yes |
 
-Two independent blockers, both verified rather than assumed:
+Compilation and execution are separate concerns:
 
 **Foundry cannot compile frame contracts.** `evm_version` is validated against a
 closed enum, and `@future` is not in it:
@@ -24,29 +25,27 @@ Error: foundry config error: Unknown evm version: @future for setting `evm_versi
 There is also no passthrough for solc's `experimental` setting, which `@future`
 requires. Pointing `solc` at the patched binary does not help.
 
-**Foundry could not execute them anyway.** Its EVM is revm, which has no
-`0xaa`/`0xb0`–`0xb4`. Etching the real `APPROVE` sequence and calling it:
+**Stock Foundry cannot execute them.** Its EVM treats `0xaa` and `0xb0`–`0xb9`
+as invalid. The toolkit pins Foundry to the published revm fork, which
+implements the baseline/native opcodes plus the provisional tooling-fixture profile.
+The `setFrameTx` cheatcode copies host-supplied context for those tests; it does not make
+fixture nonce keys, recent roots, POST_TX traces, diffs, or events normative transaction data.
 
-```
-APPROVE 0xaa executed ok: no
-TXPARAM 0xb0 executed ok: no
-```
-
-Both halt as invalid opcodes. Even with a compiled artifact, `forge test` cannot
-exercise frame semantics — there is no frame context in revm for `sigparam` or
-`frameparam` to report on.
+The account tests therefore build frame contracts with patched solc, install
+their runtime bytecode with `vm.etch`, and execute it under patched revm. This is
+real opcode execution, not a Solidity mock.
 
 ## The split, and why it is good design anyway
 
-EIP-8141 hands the account a much smaller job than ERC-4337 does. The protocol
-verifies every signature against the canonical signature hash before any frame
-runs, so the account never touches elliptic curves. What is left is a **policy**
-question: given the keys that provably signed and the frames about to execute,
-approve or not?
+EIP-8141 hands the account a much smaller job than ERC-4337 does. Before any frame runs, the
+protocol verifies every protocol signature against either the canonical transaction hash or
+its explicit digest, so the account never touches elliptic curves. What remains is a
+**policy** question: which keys signed the canonical transaction hash, and should those keys
+approve the frames about to execute?
 
 That policy is ordinary Solidity, and it is where the bugs are — threshold
 counting, duplicate signers, session-key expiry, target allowlists, selector
-extraction. `src/FrameAccountPolicy.sol` holds it, and `forge test` covers it
+extraction. `src/policy/FrameAccountPolicy.sol` holds it, and `forge test` covers it
 including fuzz runs.
 
 The frame glue — read the signers with `sigparam`, inspect frames with
@@ -61,9 +60,10 @@ The tooling boundary just happens to fall in the same place.
 ## Usage
 
 ```bash
-forge test          # policy layer, stock solc, no frame opcodes
-forge test -vvv     # with traces
-forge fmt           # formats src/ and test/
+SOLC=../solidity/build/solc/solc ./script/build-frame-accounts.sh
+../foundry/target/release/forge test          # policy + frame semantics
+../foundry/target/release/forge test -vvv     # with traces
+../foundry/target/release/forge fmt           # formats src/ and test/
 ```
 
 Building the frame-glue contracts, which Foundry cannot:
@@ -74,16 +74,13 @@ Building the frame-glue contracts, which Foundry cannot:
 SOLC=/path/to/patched/solc ./script/build-frame-accounts.sh
 ```
 
-That compiles every `../examples/*/*.sol` with the patched compiler and writes
-artifacts to `out-frame/<Name>/`. It refuses to run against a stock solc rather
-than emitting subtly wrong output. The runtime bytecode it produces is what you
-paste into the Go harness to test frame semantics — see
+That compiles every account and frame-library contract with the patched compiler using
+`--no-cbor-metadata`, then writes ABI, creation-bytecode, and runtime-bytecode artifacts to
+`out-frame/<Name>/`. `out-frame` is ignored and is not present in a fresh clone. The script
+must run before tests so they cannot accidentally consume absent or stale bytecode. It
+refuses stock solc rather than emitting subtly wrong output. The tests load those artifacts
+directly — see
 [guides/02-writing-accounts.md](../guides/02-writing-accounts.md#testing-an-account).
 
-## If you want `forge test` to run frame semantics
-
-It would take patching revm to add the six opcodes and a frame-transaction
-context, then teaching Foundry's `evm_version` enum about the fork. That is a
-real project and nothing here depends on it. Until then the Go harness is the
-only environment that implements EIP-8141, and it is the one the examples are
-verified against.
+The root gitlinks and Foundry lockfile record the exact published compiler and VM commits; see
+[VERSIONS.md](../VERSIONS.md#reproducibility-status).

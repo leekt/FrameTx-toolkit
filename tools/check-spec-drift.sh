@@ -1,30 +1,38 @@
 #!/usr/bin/env bash
-# Check whether EIP-8141 has changed since this toolkit was pinned.
+# Check whether upstream EIP-8141 has changed since this toolkit's source pin.
 #
 # Exit 0: no drift. Exit 1: the spec moved -- see VERSIONS.md for what to re-check.
 set -euo pipefail
 
 PINNED_COMMIT="064f49621d05ce25323def867a6a2ed9275d3570"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VENDORED="$REPO_ROOT/spec/EIP8141.md"
-UPSTREAM_URL="https://raw.githubusercontent.com/ethereum/EIPs/master/EIPS/eip-8141.md"
+OVERLAY="$REPO_ROOT/spec/EIP8141.md"
+PINNED_URL="https://raw.githubusercontent.com/ethereum/EIPs/$PINNED_COMMIT/EIPS/eip-8141.md"
+CURRENT_URL="https://raw.githubusercontent.com/ethereum/EIPs/master/EIPS/eip-8141.md"
 
-tmp="$(mktemp)"
-trap 'rm -f "$tmp"' EXIT
+pinned="$(mktemp)"
+current="$(mktemp)"
+trap 'rm -f "$pinned" "$current"' EXIT
 
 echo "Pinned spec commit: $PINNED_COMMIT"
-echo "Fetching current EIPS/eip-8141.md from ethereum/EIPs master..."
-curl -fsSL "$UPSTREAM_URL" -o "$tmp"
+echo "Local implementation overlay: $OVERLAY"
+echo "Comparison: exact upstream pin vs upstream master (overlay excluded)."
+echo "Fetching the exact upstream pin and current ethereum/EIPs master..."
+curl -fsSL "$PINNED_URL" -o "$pinned"
+curl -fsSL "$CURRENT_URL" -o "$current"
 
-if diff -q "$VENDORED" "$tmp" >/dev/null 2>&1; then
-    echo "No drift: the vendored spec matches upstream master."
+if diff -q "$pinned" "$current" >/dev/null 2>&1; then
+    echo "No upstream drift since the source pin."
+    if ! diff -q "$pinned" "$OVERLAY" >/dev/null 2>&1; then
+        echo "The local document differs by design: it includes native SIGDATACOPY and a tooling appendix."
+    fi
     exit 0
 fi
 
 echo
 echo "SPEC HAS CHANGED since this toolkit was pinned."
 echo "-----------------------------------------------------------------"
-diff -u "$VENDORED" "$tmp" || true
+diff -u "$pinned" "$current" || true
 echo "-----------------------------------------------------------------"
 echo
 echo "See VERSIONS.md -> 'What to re-check when the spec changes' for the"
