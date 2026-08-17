@@ -7,10 +7,15 @@
   `(target, selector)` pairs, only with `value == 0`, and only until the key's
   `validUntil` timestamp.
 
+"Owner may do anything" describes `validate()` policy: any canonical-hash signature by the
+owner bypasses the session-key expiry and call allowlist. It does not mean every admin method
+has a literal `msg.sender == owner` guard; the self-call path is detailed below.
+
 The account never runs `ecrecover`. Every `SECP256K1`/`P256` signature in the
-envelope was already verified by the protocol against `compute_sig_hash(tx)`
-*before any frame executed*. The account's job is only to ask **which key
-signed** — `SIGPARAM(i, 0x00)` — and decide whether it trusts that key.
+envelope was already verified by the protocol against its selected message before any frame
+executed. The account accepts authority only when that message is the canonical
+`compute_sig_hash(tx)`. Its job is to ask **which key signed** (`SIGPARAM(i, 0x00)`), check
+what it signed (`SIGPARAM(i, 0x02)`), and decide whether it trusts that key.
 
 The interesting part is what happens for a session key: before approving, the
 VERIFY frame walks the transaction's *entire* frame list with `TXPARAM`/
@@ -85,21 +90,26 @@ Self-relay layout — the account pays its own gas:
 | 2 | `SENDER` (2) | `0x0`               | e.g. token address  | 0     | `transfer(...)`            | The restricted operation |
 | 3 | `SENDER` (2) | `0x0`               | e.g. token address  | 0     | `approve(...)`             | Another one, also checked by frame 1 |
 
-For an owner-signed transaction frame 0 may be omitted and the layout collapses
-to the usual `self_verify` prefix.
+For an owner-signed transaction, the expiry frame is omitted. The account's VERIFY frame
+moves to index 0 and the first SENDER frame moves to index 1, the usual `self_verify` prefix.
 
-Frame 0's target must be `null` or `tx.sender`: the spec's static constraints
-reject `flags & APPROVE_EXECUTION` on any other target, and `APPROVE` itself
-reverts when `resolved_target != tx.sender`. `null` resolves to `tx.sender`, so
-either encoding works.
+The account's approval frame (index 1 in the session-key table, index 0 in the owner layout)
+must target `null` or `tx.sender`: the static constraints reject
+`flags & APPROVE_EXECUTION` on any other target, and `APPROVE` itself reverts when
+`resolved_target != tx.sender`. `null` resolves to `tx.sender`, so either encoding works.
 
-Sponsored layout — a paymaster pays:
+Sponsored session-key layout — the expiry frame remains first and a paymaster pays:
 
 | # | mode         | flags                | target             | value | data                        | purpose |
 |---|--------------|----------------------|--------------------|-------|-----------------------------|---------|
-| 0 | `VERIFY` (1) | `0x2` (EXECUTION)    | `null` or `sender` | 0     | `0x6901f668` (`validate()`) | Same code, `APPROVE(0x2)` |
-| 1 | `VERIFY` (1) | `0x1` (PAYMENT)      | paymaster          | 0     | paymaster-specific          | `APPROVE(0x1)` — must come *after* execution approval, since `APPROVE_PAYMENT` reverts while `sender_approved == false` |
-| 2 | `SENDER` (2) | `0x0`                | e.g. token address | 0     | `transfer(...)`             | The restricted operation |
+| 0 | `VERIFY` (1) | `0x0`                | `EXPIRY_VERIFIER`  | 0     | 8-byte deadline             | Required time bound for the session key |
+| 1 | `VERIFY` (1) | `0x2` (EXECUTION)    | `null` or `sender` | 0     | `0x6901f668` (`validate()`) | Session policy, then `APPROVE(0x2)` |
+| 2 | `VERIFY` (1) | `0x1` (PAYMENT)      | paymaster          | 0     | paymaster-specific          | `APPROVE(0x1)` after execution approval |
+| 3 | `SENDER` (2) | `0x0`                | e.g. token address | 0     | `transfer(...)`             | The restricted operation |
+
+For an owner-signed sponsored transaction, omit the expiry frame and renumber the remaining
+three frames to 0, 1, and 2. In both variants the paymaster frame must follow the account's
+execution approval because `APPROVE_PAYMENT` reverts while `sender_approved == false`.
 
 The contract supports both without a flag of its own: it approves
 `FRAMEPARAM(currentFrame, 0x06)`, the frame's own `flags & 0x3`, rather than
@@ -122,7 +132,7 @@ The account itself reads everything through [`FrameTxLib`](07-frametx-library.md
 which hides this; the table stays here for anyone dropping to raw assembly. The
 first Yul argument is the **topmost** stack item. Verified against
 `libevmasm/Instruction.cpp` in the patched solc and against
-`core/vm/frame_ops.go` in the patched geth:
+`revm/crates/interpreter/src/instructions/frame_tx.rs` in patched revm:
 
 | builtin                          | stack, top first                                  |
 |----------------------------------|---------------------------------------------------|
@@ -180,11 +190,21 @@ All storage this account reads (`owner`, `sessionKeys`, `allowedCall`) lives in
 `tx.sender`'s own storage, so the validation prefix also satisfies the public
 mempool rule "execution reads storage outside `tx.sender`" → rejected.
 
+### Admin calls and the self-call path
+
+`setSessionKey` and `setAllowedCall` use `onlyAdmin`, which accepts either a direct call from
+the owner address or a call whose `msg.sender` is the account itself. The latter is how an
+owner-signed SENDER frame targeting the account performs administration. It is not literally
+owner-only at the function boundary: a session-key transaction would also arrive with
+`msg.sender == address(this)`. The session policy blocks that call unless the owner has
+explicitly allowlisted `(account, setter selector)`. Do not allowlist either admin selector
+for session keys unless granting policy-administration power is intentional.
+
 ## Compiling
 
-```
-/Users/taek/worksapce/solidity/build/solc/solc --experimental --evm-version @future \
-    --bin-runtime --optimize --no-cbor-metadata SessionKeyAccount.sol
+```bash
+cd contracts
+SOLC=../solidity/build/solc/solc ./script/build-frame-accounts.sh
 ```
 
 Exit code 0; the only output on stderr is the standard "pre-release compiler
@@ -213,7 +233,7 @@ Kept minimal on purpose; each of these is a real requirement for production, and
 none is needed to show cross-frame introspection:
 
 - no gas budget for a session key. `value == 0` on every `SENDER` frame stops a
-  session key from *transferring* ETH, but in the self-relay layout frame 0 has
+  session key from *transferring* ETH, but in the session-key self-relay layout frame 1 has
   flags `0x3`, so `APPROVE` still collects `max_cost` from the account and a
   session key can drain it as gas at an arbitrary `max_fee_per_gas`. Capping
   that means reading `TXPARAM(0x06)` (max cost) or `TXPARAM(0x04)`

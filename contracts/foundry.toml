@@ -1,8 +1,9 @@
 # The policy layer compiles and tests with stock solc: it contains no EIP-8141
 # opcodes, so Foundry's EVM can execute it. The frame glue that does use the new
-# opcodes lives in ../examples and is built by script/build-frame-accounts.sh,
-# because Foundry cannot compile it (evm_version "@future" is not in its enum)
-# and could not execute it if it could (revm has no 0xaa/0xb0-0xb4).
+# opcodes lives in src/accounts and src/frame and is built by
+# script/build-frame-accounts.sh because Foundry cannot compile it (evm_version
+# "@future" is not in its enum). The toolkit's patched revm executes the
+# resulting artifacts during forge tests.
 [profile.default]
 # Only the policy layer is compiled by forge. The accounts in src/accounts use
 # the frame opcodes, which forge cannot compile; build-frame-accounts.sh handles

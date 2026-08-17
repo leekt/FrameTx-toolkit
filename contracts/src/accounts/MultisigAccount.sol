@@ -7,9 +7,9 @@ import {FrameTxLib} from "../frame/FrameTxLib.sol";
 /// @author taek <leekt216@gmail.com>
 /// @notice The whole account is one validation function. There is no `execute()`, no
 ///         `UserOperation` struct, no signature blob, and no `ecrecover`: the protocol has
-///         already verified every secp256k1/P256 signature in the envelope against the
-///         canonical transaction signature hash before this code runs. All this contract
-///         does is ask *which keys signed* and decide whether it trusts enough of them.
+///         already verified every secp256k1/P256 signature against its selected message.
+///         This contract admits only entries over the canonical transaction hash, asks
+///         *which keys signed*, and decides whether it trusts enough of them.
 contract MultisigAccount {
     mapping(address => bool) public isOwner;
     uint256 public threshold;

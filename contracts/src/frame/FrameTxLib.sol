@@ -3,16 +3,20 @@ pragma solidity ^0.8.30;
 
 /// @title  FrameTxLib
 /// @author taek <leekt216@gmail.com>
-/// @notice Typed Solidity surface over the EIP-8141 frame transaction opcodes:
-///         TXPARAM (0xb0), FRAMEDATALOAD (0xb1), FRAMEDATACOPY (0xb2),
-///         FRAMEPARAM (0xb3), SIGPARAM (0xb4) and APPROVE (0xaa).
+/// @notice Typed Solidity surface over the pinned EIP-8141/native-SIGDATACOPY
+///         opcodes: APPROVE (0xaa), TXPARAM (0xb0), FRAMEDATALOAD (0xb1),
+///         FRAMEDATACOPY (0xb2), FRAMEPARAM (0xb3), SIGPARAM (0xb4), and
+///         SIGDATACOPY (0xb5).
 /// @dev    Requires the patched solc (`--experimental --evm-version @future`);
-///         every function here compiles to a frame opcode that only exists
-///         inside a frame transaction. Calling any of them from another
-///         transaction type is an exceptional halt, not a revert: it burns the
-///         frame's remaining gas. The same is true for every out-of-bounds
-///         index and the other halt cases flagged below, so validate inputs
-///         you do not control before passing them down.
+///         it also exposes the local, non-normative tooling-fixture allocation
+///         RECENTROOTREFLOAD (0xb6), TXTRACE (0xb7), TXDIFF (0xb8), and
+///         EVENTDATACOPY (0xb9). Fixture TXPARAM selectors 0x0C-0x10, mode
+///         MODE_POST_TX, recent roots, and trace/diff/event values are supplied
+///         by the host; this library does not make them transaction-wire data.
+///         Every function requires an active frame context. An absent context,
+///         an out-of-bounds index, or another halt case flagged below causes an
+///         exceptional halt, not a revert. TXTRACE, TXDIFF, and EVENTDATACOPY
+///         additionally require the current fixture frame to have MODE_POST_TX.
 ///
 ///         All functions are `internal`, so the library inlines and needs no
 ///         linking or deployment.
@@ -24,10 +28,12 @@ library FrameTxLib {
     uint256 internal constant SCHEME_SECP256K1 = 1;
     uint256 internal constant SCHEME_P256 = 2;
 
-    /// Frame modes (`frameMode`).
+    /// Frame modes (`frameMode`). Modes 0-2 are normative EIP-8141;
+    /// MODE_POST_TX is a non-normative tooling-fixture mode.
     uint256 internal constant MODE_DEFAULT = 0;
     uint256 internal constant MODE_VERIFY = 1;
     uint256 internal constant MODE_SENDER = 2;
+    uint256 internal constant MODE_POST_TX = 3;
 
     /// Frame statuses (`frameStatus`).
     uint256 internal constant STATUS_FAILED = 0;
@@ -54,7 +60,9 @@ library FrameTxLib {
         }
     }
 
-    /// @notice The transaction nonce (TXPARAM 0x01).
+    /// @notice The scalar wire nonce under normative EIP-8141 (TXPARAM 0x01).
+    ///         A non-normative tooling fixture instead supplies this field as
+    ///         a shared keyed-nonce sequence.
     function txNonce() internal view returns (uint256 v) {
         assembly ("memory-safe") {
             v := txparam(0x01)
@@ -136,6 +144,75 @@ library FrameTxLib {
         }
     }
 
+    /// @notice Host-supplied sender legacy nonce in transaction pre-state
+    ///         (fixture TXPARAM 0x0C), distinct from the fixture interpretation
+    ///         of `txNonce()` as a shared sequence. Non-normative.
+    function legacyNonce() internal view returns (uint256 v) {
+        assembly ("memory-safe") {
+            v := txparam(0x0C)
+        }
+    }
+
+    /// @notice Number of host-supplied nonce keys (fixture TXPARAM 0x0D).
+    ///         Non-normative; the opcode does not validate their ordering.
+    function nonceKeyCount() internal view returns (uint256 v) {
+        assembly ("memory-safe") {
+            v := txparam(0x0D)
+        }
+    }
+
+    /// @notice Host-supplied nonce-key-list hash (fixture TXPARAM 0x0E).
+    ///         Non-normative; the opcode and cheatcode do not derive it.
+    function nonceKeysHash() internal view returns (bytes32 v) {
+        assembly ("memory-safe") {
+            v := txparam(0x0E)
+        }
+    }
+
+    /// @notice Number of host-supplied recent-root references
+    ///         (fixture TXPARAM 0x0F). Non-normative and not verified here.
+    function recentRootReferenceCount() internal view returns (uint256 v) {
+        assembly ("memory-safe") {
+            v := txparam(0x0F)
+        }
+    }
+
+    /// @notice First host-supplied nonce key (fixture TXPARAM 0x10).
+    ///         Non-normative; exceptional-halts when the fixture list is empty.
+    function firstNonceKey() internal view returns (uint256 v) {
+        assembly ("memory-safe") {
+            v := txparam(0x10)
+        }
+    }
+
+    // --------------------------------------- host-supplied recent-root fixture
+    // Non-normative. RECENTROOTREFLOAD does not verify roots and halts on an
+    // out-of-bounds `referenceIndex`.
+
+    /// @notice A host-supplied recent-root reference's source id
+    ///         (RECENTROOTREFLOAD field 0x00).
+    function recentRootSourceId(uint256 referenceIndex) internal view returns (bytes32 v) {
+        assembly ("memory-safe") {
+            v := recentrootrefload(0x00, referenceIndex)
+        }
+    }
+
+    /// @notice A host-supplied recent-root reference's consensus slot
+    ///         (RECENTROOTREFLOAD field 0x01).
+    function recentRootSlot(uint256 referenceIndex) internal view returns (uint256 v) {
+        assembly ("memory-safe") {
+            v := recentrootrefload(0x01, referenceIndex)
+        }
+    }
+
+    /// @notice A host-supplied recent-root reference's opaque root
+    ///         (RECENTROOTREFLOAD field 0x02).
+    function recentRoot(uint256 referenceIndex) internal view returns (bytes32 v) {
+        assembly ("memory-safe") {
+            v := recentrootrefload(0x02, referenceIndex)
+        }
+    }
+
     // ----------------------------------------------------------- frame scope
     // FRAMEPARAM halts on an out-of-bounds `frameIndex`.
 
@@ -154,7 +231,8 @@ library FrameTxLib {
         }
     }
 
-    /// @notice The frame's mode (FRAMEPARAM 0x02): one of the MODE_* values.
+    /// @notice The frame's mode (FRAMEPARAM 0x02): normative modes 0-2, or the
+    ///         host-supplied non-normative fixture mode MODE_POST_TX.
     function frameMode(uint256 frameIndex) internal view returns (uint256 v) {
         assembly ("memory-safe") {
             v := frameparam(frameIndex, 0x02)
@@ -288,8 +366,8 @@ library FrameTxLib {
         }
     }
 
-    /// @notice A slice of an ARBITRARY entry's raw signature bytes (SIGPARAM
-    ///         0x04 via the `sigdatacopy` builtin), CALLDATACOPY semantics:
+    /// @notice A slice of an ARBITRARY entry's raw signature bytes
+    ///         (`SIGDATACOPY` 0xB5), with CALLDATACOPY semantics:
     ///         bytes past the end are zero-filled, no bounds check. Halts if
     ///         the entry's scheme is not ARBITRARY -- protocol-verified schemes
     ///         keep their bytes opaque to allow future aggregation.
@@ -300,13 +378,295 @@ library FrameTxLib {
     {
         data = new bytes(length);
         assembly ("memory-safe") {
-            sigdatacopy(signatureIndex, add(data, 0x20), offset, length)
+            sigdatacopy(add(data, 0x20), offset, length, signatureIndex)
         }
     }
 
     /// @notice An ARBITRARY entry's full raw signature bytes.
     function sigData(uint256 signatureIndex) internal view returns (bytes memory) {
         return sigDataSlice(signatureIndex, 0, sigLength(signatureIndex));
+    }
+
+    // ------------------------------ host-supplied POST_TX trace fixture scope
+    // Non-normative. Every TXTRACE wrapper reads host-supplied data and
+    // exceptional-halts unless the current fixture frame has MODE_POST_TX.
+    // Indexed selectors also halt when their global trace index is out of bounds;
+    // event topic selectors halt when that topic does not exist.
+
+    /// @notice Number of global balance-diff entries (TXTRACE 0x00).
+    function traceBalanceDiffCount() internal view returns (uint256 v) {
+        assembly ("memory-safe") {
+            v := txtrace(0, 0x00)
+        }
+    }
+
+    /// @notice Number of global storage-diff entries (TXTRACE 0x01).
+    function traceStorageDiffCount() internal view returns (uint256 v) {
+        assembly ("memory-safe") {
+            v := txtrace(0, 0x01)
+        }
+    }
+
+    /// @notice Number of deployed-contract entries (TXTRACE 0x02).
+    function traceDeploymentCount() internal view returns (uint256 v) {
+        assembly ("memory-safe") {
+            v := txtrace(0, 0x02)
+        }
+    }
+
+    /// @notice Account for a global balance-diff entry (TXTRACE 0x03).
+    function traceBalanceAccount(uint256 index) internal view returns (address v) {
+        assembly ("memory-safe") {
+            v := txtrace(index, 0x03)
+        }
+    }
+
+    /// @notice Host-supplied pre-transaction balance for a global entry
+    ///         (TXTRACE 0x04).
+    function traceBalanceBefore(uint256 index) internal view returns (uint256 v) {
+        assembly ("memory-safe") {
+            v := txtrace(index, 0x04)
+        }
+    }
+
+    /// @notice Host-supplied balance for a global entry at the fixture POST_TX
+    ///         view (TXTRACE 0x05).
+    function traceBalanceAfter(uint256 index) internal view returns (uint256 v) {
+        assembly ("memory-safe") {
+            v := txtrace(index, 0x05)
+        }
+    }
+
+    /// @notice Account for a global storage-diff entry (TXTRACE 0x06).
+    function traceStorageAccount(uint256 index) internal view returns (address v) {
+        assembly ("memory-safe") {
+            v := txtrace(index, 0x06)
+        }
+    }
+
+    /// @notice Key for a global storage-diff entry (TXTRACE 0x07).
+    function traceStorageKey(uint256 index) internal view returns (uint256 v) {
+        assembly ("memory-safe") {
+            v := txtrace(index, 0x07)
+        }
+    }
+
+    /// @notice Host-supplied pre-transaction value for a global storage entry
+    ///         (TXTRACE 0x08).
+    function traceStorageBefore(uint256 index) internal view returns (uint256 v) {
+        assembly ("memory-safe") {
+            v := txtrace(index, 0x08)
+        }
+    }
+
+    /// @notice Host-supplied value for a global storage entry at the fixture
+    ///         POST_TX view (TXTRACE 0x09).
+    function traceStorageAfter(uint256 index) internal view returns (uint256 v) {
+        assembly ("memory-safe") {
+            v := txtrace(index, 0x09)
+        }
+    }
+
+    /// @notice Account for a deployed-contract entry (TXTRACE 0x0A).
+    function traceDeployedAccount(uint256 index) internal view returns (address v) {
+        assembly ("memory-safe") {
+            v := txtrace(index, 0x0A)
+        }
+    }
+
+    /// @notice Host-supplied current code hash for a deployed-contract entry
+    ///         (TXTRACE 0x0B).
+    function traceDeployedCodeHash(uint256 index) internal view returns (bytes32 v) {
+        assembly ("memory-safe") {
+            v := txtrace(index, 0x0B)
+        }
+    }
+
+    /// @notice Number of events in global emission order (TXTRACE 0x0C).
+    function traceEventCount() internal view returns (uint256 v) {
+        assembly ("memory-safe") {
+            v := txtrace(0, 0x0C)
+        }
+    }
+
+    /// @notice Emitter for an event in global emission order (TXTRACE 0x0D).
+    function traceEventEmitter(uint256 eventIndex) internal view returns (address v) {
+        assembly ("memory-safe") {
+            v := txtrace(eventIndex, 0x0D)
+        }
+    }
+
+    /// @notice Number of topics on an event (TXTRACE 0x0E).
+    function traceEventTopicCount(uint256 eventIndex) internal view returns (uint256 v) {
+        assembly ("memory-safe") {
+            v := txtrace(eventIndex, 0x0E)
+        }
+    }
+
+    /// @notice Topic 0 on an event (TXTRACE 0x0F).
+    function traceEventTopic0(uint256 eventIndex) internal view returns (bytes32 v) {
+        assembly ("memory-safe") {
+            v := txtrace(eventIndex, 0x0F)
+        }
+    }
+
+    /// @notice Topic 1 on an event (TXTRACE 0x10).
+    function traceEventTopic1(uint256 eventIndex) internal view returns (bytes32 v) {
+        assembly ("memory-safe") {
+            v := txtrace(eventIndex, 0x10)
+        }
+    }
+
+    /// @notice Topic 2 on an event (TXTRACE 0x11).
+    function traceEventTopic2(uint256 eventIndex) internal view returns (bytes32 v) {
+        assembly ("memory-safe") {
+            v := txtrace(eventIndex, 0x11)
+        }
+    }
+
+    /// @notice Topic 3 on an event (TXTRACE 0x12).
+    function traceEventTopic3(uint256 eventIndex) internal view returns (bytes32 v) {
+        assembly ("memory-safe") {
+            v := txtrace(eventIndex, 0x12)
+        }
+    }
+
+    /// @notice Length of an event's non-indexed data (TXTRACE 0x13).
+    function traceEventDataLength(uint256 eventIndex) internal view returns (uint256 v) {
+        assembly ("memory-safe") {
+            v := txtrace(eventIndex, 0x13)
+        }
+    }
+
+    /// @notice Host-supplied gas pre-charge value (TXTRACE 0x14).
+    function traceGasPreCharge() internal view returns (uint256 v) {
+        assembly ("memory-safe") {
+            v := txtrace(0, 0x14)
+        }
+    }
+
+    /// @notice Host-supplied gas-payer account (TXTRACE 0x15).
+    function traceGasPayer() internal view returns (address v) {
+        assembly ("memory-safe") {
+            v := txtrace(0, 0x15)
+        }
+    }
+
+    // ------------------------------- host-supplied POST_TX diff fixture scope
+    // Non-normative. Every TXDIFF wrapper exceptional-halts outside the fixture
+    // MODE_POST_TX. Direct selectors 0x00-0x05 access live host state on both
+    // supplied-diff hits and misses. Their provisional 100 gas is the warm total;
+    // a cold access adds only the applicable EIP-2929 cold premium.
+
+    /// @notice Fixture pre-transaction view of `account[key]` (TXDIFF 0x00).
+    function storageValueBefore(address account, uint256 key) internal view returns (uint256 v) {
+        assembly ("memory-safe") {
+            v := txdiff(0x00, account, key)
+        }
+    }
+
+    /// @notice Fixture POST_TX view of `account[key]` (TXDIFF 0x01).
+    function storageValueAfter(address account, uint256 key) internal view returns (uint256 v) {
+        assembly ("memory-safe") {
+            v := txdiff(0x01, account, key)
+        }
+    }
+
+    /// @notice Fixture pre-transaction balance view for `account` (TXDIFF 0x02).
+    function accountBalanceBefore(address account) internal view returns (uint256 v) {
+        assembly ("memory-safe") {
+            v := txdiff(0x02, account, 0)
+        }
+    }
+
+    /// @notice Fixture POST_TX balance view for `account` (TXDIFF 0x03).
+    function accountBalanceAfter(address account) internal view returns (uint256 v) {
+        assembly ("memory-safe") {
+            v := txdiff(0x03, account, 0)
+        }
+    }
+
+    /// @notice Fixture pre-transaction code-hash view for `account` (TXDIFF 0x04).
+    function accountCodeHashBefore(address account) internal view returns (bytes32 v) {
+        assembly ("memory-safe") {
+            v := txdiff(0x04, account, 0)
+        }
+    }
+
+    /// @notice Fixture POST_TX code-hash view for `account` (TXDIFF 0x05).
+    function accountCodeHashAfter(address account) internal view returns (bytes32 v) {
+        assembly ("memory-safe") {
+            v := txdiff(0x05, account, 0)
+        }
+    }
+
+    /// @notice Number of storage-diff entries for `account` (TXDIFF 0x06).
+    function accountStorageDiffCount(address account) internal view returns (uint256 v) {
+        assembly ("memory-safe") {
+            v := txdiff(0x06, account, 0)
+        }
+    }
+
+    /// @notice Global TXTRACE storage index at an account-local index
+    ///         (TXDIFF 0x07). Halts when the local index is out of bounds.
+    function accountStorageDiffIndex(address account, uint256 localIndex)
+        internal
+        view
+        returns (uint256 v)
+    {
+        assembly ("memory-safe") {
+            v := txdiff(0x07, account, localIndex)
+        }
+    }
+
+    /// @notice Number of events emitted by `account` (TXDIFF 0x08).
+    function accountEventCount(address account) internal view returns (uint256 v) {
+        assembly ("memory-safe") {
+            v := txdiff(0x08, account, 0)
+        }
+    }
+
+    /// @notice Global TXTRACE event index at an account-local index
+    ///         (TXDIFF 0x09). Halts when the local index is out of bounds.
+    function accountEventIndex(address account, uint256 localIndex)
+        internal
+        view
+        returns (uint256 v)
+    {
+        assembly ("memory-safe") {
+            v := txdiff(0x09, account, localIndex)
+        }
+    }
+
+    /// @notice Account change flags (TXDIFF 0x0A): bit 0 nonce, bit 1 balance,
+    ///         bit 2 storage and bit 3 code hash.
+    function accountDiffFlags(address account) internal view returns (uint256 v) {
+        assembly ("memory-safe") {
+            v := txdiff(0x0A, account, 0)
+        }
+    }
+
+    // ------------------------- host-supplied POST_TX event-data fixture scope
+
+    /// @notice A strict slice of a host-supplied fixture event's non-indexed
+    ///         data (EVENTDATACOPY 0xB9). Exceptional-halts outside MODE_POST_TX,
+    ///         for an invalid event index, or when `dataOffset + length` exceeds
+    ///         the source; unlike frame/signature copies, it never zero-fills an
+    ///         overrun.
+    function eventDataSlice(uint256 eventIndex, uint256 dataOffset, uint256 length)
+        internal
+        view
+        returns (bytes memory data)
+    {
+        data = new bytes(length);
+        assembly ("memory-safe") {
+            eventdatacopy(eventIndex, add(data, 0x20), dataOffset, length)
+        }
+    }
+
+    /// @notice A host-supplied fixture event's full non-indexed data. POST_TX-only.
+    function eventData(uint256 eventIndex) internal view returns (bytes memory) {
+        return eventDataSlice(eventIndex, 0, traceEventDataLength(eventIndex));
     }
 
     // ---------------------------------------------------------------- approve
@@ -323,8 +683,8 @@ library FrameTxLib {
         }
     }
 
-    /// @notice APPROVE returning `data` to the caller of the frame, for
-    ///         verifiers whose caller expects return data.
+    /// @notice APPROVE returning the raw contents of `data` to the frame caller.
+    ///         This is RETURN-style data, not ABI encoding of a `bytes` value.
     function approve(uint256 scope, bytes memory data) internal {
         assembly ("memory-safe") {
             approvetx(add(data, 0x20), mload(data), scope)

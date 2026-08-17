@@ -121,46 +121,28 @@ the sponsor's carrying an explicit 20-byte `signer`. Neither batching nor sponso
 code deployed at either address. Leaving frame 0 at `0x3` and appending the sponsor frame
 makes the transaction invalid (frame 1 reverts, and a reverting `VERIFY` frame is fatal).
 
-## What the Go test proves
+## What the Anvil tests prove
 
-[`go-ethereum/core/eip8141_test.go`](../../go-ethereum/core/eip8141_test.go),
-`TestFrameTxDefaultCode` (with helpers `selfVerifyFrame`, `senderFrame`, `signFrameTx`), builds
-exactly the two-frame layout above against a state where `frameSenderAddress` is funded and has
-**no code entry at all**, and applies it through the real state transition:
+The working-tree integration suite at
+[`foundry/crates/anvil/tests/it/frame_tx.rs`](../../foundry/crates/anvil/tests/it/frame_tx.rs)
+submits signed type-`0x06` envelopes through Anvil's raw JSON-RPC path and asserts resulting
+state. Its default-code cases pin both self-relay and sponsorship:
 
-```
-cd /Users/taek/worksapce/FrameTx-toolkit/go-ethereum
-go test ./core/ -run TestFrameTxDefaultCode -v
-```
+- `default_code_verify_approves_the_scope_its_flags_name` mines the canonical-hash case and
+  observes the later SENDER frame's storage write;
+- `default_code_verify_without_an_approval_scope_is_not_mined` proves scope zero approves
+  nothing;
+- `default_code_verify_with_an_explicit_msg_is_not_mined` uses a correctly signed explicit
+  digest, proving signature validity alone is insufficient;
+- `default_code_payment_only_scope_uses_signature_index_one` proves a codeless sponsor pays
+  and the user operation executes;
+- `default_code_payment_only_scope_ignores_a_signature_at_another_index` moves the sponsor
+  signature away from index 1 and proves positional selection is enforced.
 
-```
-=== RUN   TestFrameTxDefaultCode
---- PASS: TestFrameTxDefaultCode (0.00s)
-PASS
-ok  	github.com/ethereum/go-ethereum/core	0.964s
-```
-
-Its assertions map one-to-one onto the claims above:
-
-- `res.Payer == frameSenderAddress` — the default code's `APPROVE(0x3)` really did set `payer`,
-  so a codeless account paid for its own transaction with no contract involved.
-- both frame receipts have `ReceiptStatusSuccessful` — the `VERIFY` frame did not revert, which
-  is the only way frame 1 could run.
-- `slotSet(sdb, frameStoreAddr)` — the `SENDER` frame actually executed and wrote storage as the
-  sender, i.e. `sender_approved` was granted.
-- `sdb.GetNonce(frameSenderAddress) == 1` — the nonce is consumed exactly once, by the approval,
-  not once per frame.
-- `res.FrameReceipts[0].GasUsed != 0` — the validation frame is metered, not free.
-
-The signature the test builds is the whole point: `signFrameTx` sets
-`Signatures[0] = {Scheme: SECP256K1}` with *no* signer and *no* msg, computes
-`ftx.ComputeSigHash()`, signs it with the sender's key and re-encodes it as `v ‖ r ‖ s`
-(EIP-8141's order; `crypto.Sign` returns `r ‖ s ‖ v`). Change the index, the scheme, the `msg`,
-or the key, and the default code reverts the `VERIFY` frame, which invalidates the transaction.
-
-A useful contrast is the very next test, `TestFrameTxContractSenderApprove`: identical
-transaction, but the sender has five bytes of code (`60035f5faa` = `PUSH1 0x03; PUSH0; PUSH0;
-APPROVE`). Same outcome. The default code is what that bytecode would have been.
+The positive self-relay integration also checks that the sender nonce advances once, the
+payer loses value plus a non-zero fee, the SENDER target receives value and writes storage,
+and the mined transaction is retrievable as type `0x06`. These tests are part of the recorded
+Foundry gitlink; see [VERSIONS.md](../../VERSIONS.md#reproducibility-status).
 
 ## Why this matters
 
@@ -182,24 +164,18 @@ functionality, so tooling can assume it rather than probing for it.
 Things that are underspecified or surprising, flagged rather than guessed:
 
 - **Gas cost of the default code is not specified.** The spec says what the default code *does*
-  but never what it *costs*; contrast the expiry verifier frame, where the spec explicitly says
-  "the frame consumes gas according to normal EVM execution rules". go-ethereum charges the
-  frame's budget for a target account access (`ColdAccountAccessAmsterdam` = 3000, or
-  `WarmAccountAccessAmsterdam` = 100 if already warm) and nothing for the default code proper,
-  with an in-code comment noting a top-level `evm.Call` would otherwise leave it free and let a
-  transaction touch `MAX_FRAMES` cold accounts for nothing. In the test's layout `tx.sender` is
-  pre-warmed by `Prepare`, so the `VERIFY` frame's receipt reports exactly **100 gas** (frame 1
-  reports 113026, hitting a cold target plus an `SSTORE`; total `gas_used` 132916). Treat the
-  100 as an implementation detail, not a spec guarantee.
+  but never assigns a separate cost; contrast the expiry verifier frame, where it explicitly
+  says "the frame consumes gas according to normal EVM execution rules". Do not treat a
+  client's current account-access charge as a spec guarantee.
 - **Out-of-range `sig_index` is not called out.** If `allowed_scope == 0x1` and the transaction
   carries fewer than two signatures, the spec's phrasing ("if there is not a `SECP256K1`
-  signature at index `sig_index` such that…") implies a revert; go-ethereum reverts explicitly.
-  Unambiguous in effect, but only by reading.
+  signature at index `sig_index` such that…") implies a revert. Anvil's implementation uses a
+  bounds-checked lookup and rejects the frame when the entry is absent.
 - **The non-existent-account case is not literally covered.** The spec keys the default code on
-  the *empty code hash*; an account that has never been touched has no hash at all
-  (go-ethereum's `frameTargetHasNoCode` accepts both `types.EmptyCodeHash` and the zero hash).
-  This is the obviously-intended reading, since such an account is codeless by any definition,
-  but the spec text does not say it.
+  the *empty code hash*; an account that has never been touched has no hash at all. Anvil's
+  `target_has_no_code` accepts a missing account, the canonical empty-code hash, and the zero
+  hash. This is the obviously intended reading, since such an account is codeless by any
+  definition, but the spec text does not say it explicitly.
 - **The positional signature indices are a real footgun.** `0` for anything approving execution
   and `1` for payment-only is arbitrary-looking, and nothing in the encoding marks which entry
   is which; a wallet that reorders the signature list silently breaks validation. The rule is

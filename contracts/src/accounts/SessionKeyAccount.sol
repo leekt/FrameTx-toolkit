@@ -9,15 +9,16 @@ import {FrameTxLib} from "../frame/FrameTxLib.sol";
 ///         *session keys* may only drive a pre-approved (target, selector) set
 ///         with zero value, and only until the key's expiry.
 ///
-/// The protocol has already verified every SECP256K1 / P256 signature in the
-/// envelope against `compute_sig_hash(tx)` before this code runs. So this
-/// account never calls `ecrecover`: it asks SIGPARAM *which key signed* and
-/// decides whether it trusts that key. All it adds is policy.
+/// Before this code runs, the protocol has verified every SECP256K1 / P256
+/// signature against either `compute_sig_hash(tx)` or its explicit digest. This
+/// account never calls `ecrecover`: it asks SIGPARAM which key signed, requires
+/// the canonical transaction-hash case, and applies policy.
 ///
 /// The policy for a session key is enforced by cross-frame introspection: the
 /// VERIFY frame walks every frame the transaction will execute and rejects the
 /// whole transaction unless each SENDER frame is one this session key is
-/// allowed to make. See README.md for why walking *every* frame is mandatory.
+/// allowed to make. See `contracts/docs/05-session-key-account.md` for why
+/// walking *every* frame is mandatory.
 ///
 /// Expiry works the same way. TIMESTAMP is banned during validation-prefix
 /// execution, so the account cannot compare `block.timestamp` to the key's

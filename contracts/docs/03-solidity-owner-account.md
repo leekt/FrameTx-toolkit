@@ -15,9 +15,10 @@ The library is `internal`, so this inlines to the bare opcodes — `sigparam(0, 
 the signer, `sigparam(0, 0x02)` for the `msg` field, `approvetx(0, 0, 3)` — with no
 dispatch or linking; the disassembly below shows exactly that.
 
-The protocol verified the secp256k1 (or P256) signature against the canonical signature
-hash **before frame 0 ran**. `SIGPARAM` hands the account the already-verified result. The
-account's only job is policy: *do I trust that key, and did it sign this transaction?*
+The protocol verified the secp256k1 (or P256) signature against its selected message
+**before frame 0 ran**. `SIGPARAM` hands the account the already-verified result. The
+account's policy asks both: *do I trust that key, and was the selected message this
+transaction's canonical hash?*
 
 ## Frame layout
 
@@ -53,8 +54,9 @@ No frame ever calls an `execute()` function on the account: in `SENDER` mode the
 
 ## Compiling
 
-```
-/Users/taek/worksapce/solidity/build/solc/solc --experimental --evm-version @future --bin-runtime --optimize --no-cbor-metadata OwnerAccount.sol
+```bash
+cd contracts
+SOLC=../solidity/build/solc/solc ./script/build-frame-accounts.sh
 ```
 
 Compiles with zero errors (one unavoidable warning that this is a pre-release compiler).
@@ -188,15 +190,16 @@ still get *policy* wrong; skipping the `msg` check below is the interesting way 
 1. **`FRAMEDATALOAD` operand order** is stated as `offset` at `top - 0`, `frameIndex` at
    `top - 1` (spec § `FRAMEDATALOAD`), i.e. `framedataload(offset, frameIndex)` — the
    opposite of `FRAMEPARAM`/`SIGPARAM`, which put the index on top. Some circulating
-   summaries list it index-first. The go-ethereum implementation
-   (`core/vm/frame_ops.go`, `opFrameDataLoad`) pops `offset` first, matching the spec.
+   summaries list it index-first. The revm implementation in
+   `revm/crates/interpreter/src/instructions/frame_tx.rs` pops `offset` first, matching the
+   local implementation spec.
    Not used by this example, but stated here because it is easy to get backwards.
 2. **Exceptional halt vs. revert in a `VERIFY` frame.** The spec says "if the frame
    reverts, the transaction is invalid". It does not spell out an *exceptional halt* —
    which is what `sigparam(0, 0x00)` on an `ARBITRARY` entry, or an out-of-bounds index,
-   produces. go-ethereum treats any VM error in a `VERIFY` frame as making the transaction
-   invalid (`core/state_transition.go`). This example relies on that reading; the
-   difference is only observable in gas accounting for an already-invalid transaction.
+   produces. The patched revm fixture surfaces both as a failed frame call; the account tests
+   rely on that fatal validation outcome. The distinction is otherwise observable only in
+   gas accounting for an already-invalid transaction.
 3. **`VERIFY` frame data is unconstrained.** The spec's structural rules for `self_verify`
    fix mode, flags, target, and the `APPROVE` scope, but say nothing about `frame.data`.
    The examples in the spec all show empty data. This example puts a 4-byte selector there

@@ -134,15 +134,25 @@ contract SessionKeyAccountTest is FrameTest {
         });
         IFrameVm.FrameTxSignature[] memory sigs = new IFrameVm.FrameTxSignature[](1);
         sigs[0] = secpSig(signer);
+        uint256[] memory nonceKeys = legacyNonceKeys();
         ctx = IFrameVm.FrameTx({
             sender: account,
             nonce: 0,
+            legacyNonce: 0,
+            nonceKeys: nonceKeys,
+            nonceKeysHash: LEGACY_NONCE_KEYS_HASH,
             sigHash: bytes32(uint256(0xf00d)),
             maxCost: 0,
+            maxPriorityFeePerGas: 0,
+            maxFeePerGas: 0,
+            maxFeePerBlobGas: 0,
+            blobCount: 0,
             frameIndex: 0,
-            approvableScopes: scopes,
             frames: frames,
-            signatures: sigs
+            signatures: sigs,
+            recentRootReferences: new IFrameVm.FrameTxRecentRootReference[](0),
+            trace: emptyTrace(),
+            approvableScopes: scopes
         });
     }
 

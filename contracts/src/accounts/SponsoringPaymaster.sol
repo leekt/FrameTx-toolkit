@@ -11,12 +11,12 @@ import {FrameTxLib} from "../frame/FrameTxLib.sol";
 /// This contract is the target of a `pay` frame -- VERIFY mode with
 /// flags == 0x1 (APPROVE_PAYMENT only). It must come AFTER the sender's
 /// `only_verify` frame, because APPROVE(APPROVE_PAYMENT) reverts unless
-/// `sender_approved` is already true. See README.md for the frame table.
+/// `sender_approved` is already true. See `contracts/docs/06-paymaster.md`.
 ///
-/// The central idea: the protocol has ALREADY verified every secp256k1/P256
-/// signature in `tx.signatures` against the canonical signature hash before any
-/// frame runs. So this contract does no ecrecover. It asks SIGPARAM *which key*
-/// signed, and decides whether it trusts that key.
+/// The central idea: before any frame runs, the protocol has ALREADY verified
+/// every secp256k1/P256 signature against its selected message. This contract
+/// does no ecrecover; it asks SIGPARAM which key signed, requires the canonical
+/// transaction-hash case, and decides whether it trusts that key.
 contract SponsoringPaymaster {
     /// @notice Can withdraw the sponsorship balance.
     address public immutable owner;
@@ -26,7 +26,7 @@ contract SponsoringPaymaster {
     ///      validation rules reject a validation-prefix frame that "reads
     ///      storage outside tx.sender", and an immutable is baked into the
     ///      runtime code, so reading it is not an SLOAD. Rotating the key means
-    ///      redeploying. See README "Mempool caveats".
+    ///      redeploying. See `contracts/docs/06-paymaster.md`, "Mempool caveats".
     address public immutable sponsorSigner;
 
     /// @notice Refuse to sponsor a transaction whose TXPARAM(0x06) max cost

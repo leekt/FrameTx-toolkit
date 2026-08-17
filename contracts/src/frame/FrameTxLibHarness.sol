@@ -21,8 +21,24 @@ contract FrameTxLibHarness {
         return FrameTxLib.txSender();
     }
 
+    function maxPriorityFeePerGas() external view returns (uint256) {
+        return FrameTxLib.maxPriorityFeePerGas();
+    }
+
+    function maxFeePerGas() external view returns (uint256) {
+        return FrameTxLib.maxFeePerGas();
+    }
+
+    function maxFeePerBlobGas() external view returns (uint256) {
+        return FrameTxLib.maxFeePerBlobGas();
+    }
+
     function maxCost() external view returns (uint256) {
         return FrameTxLib.maxCost();
+    }
+
+    function blobCount() external view returns (uint256) {
+        return FrameTxLib.blobCount();
     }
 
     function sigHash() external view returns (bytes32) {
@@ -39,6 +55,38 @@ contract FrameTxLibHarness {
 
     function signatureCount() external view returns (uint256) {
         return FrameTxLib.signatureCount();
+    }
+
+    function legacyNonce() external view returns (uint256) {
+        return FrameTxLib.legacyNonce();
+    }
+
+    function nonceKeyCount() external view returns (uint256) {
+        return FrameTxLib.nonceKeyCount();
+    }
+
+    function nonceKeysHash() external view returns (bytes32) {
+        return FrameTxLib.nonceKeysHash();
+    }
+
+    function recentRootReferenceCount() external view returns (uint256) {
+        return FrameTxLib.recentRootReferenceCount();
+    }
+
+    function firstNonceKey() external view returns (uint256) {
+        return FrameTxLib.firstNonceKey();
+    }
+
+    function recentRootSourceId(uint256 i) external view returns (bytes32) {
+        return FrameTxLib.recentRootSourceId(i);
+    }
+
+    function recentRootSlot(uint256 i) external view returns (uint256) {
+        return FrameTxLib.recentRootSlot(i);
+    }
+
+    function recentRoot(uint256 i) external view returns (bytes32) {
+        return FrameTxLib.recentRoot(i);
     }
 
     function frameTarget(uint256 i) external view returns (address) {
@@ -131,6 +179,158 @@ contract FrameTxLibHarness {
 
     function sigData(uint256 i) external view returns (bytes memory) {
         return FrameTxLib.sigData(i);
+    }
+
+    function traceBalanceDiffCount() external view returns (uint256) {
+        return FrameTxLib.traceBalanceDiffCount();
+    }
+
+    function traceStorageDiffCount() external view returns (uint256) {
+        return FrameTxLib.traceStorageDiffCount();
+    }
+
+    function traceDeploymentCount() external view returns (uint256) {
+        return FrameTxLib.traceDeploymentCount();
+    }
+
+    function traceBalanceAccount(uint256 i) external view returns (address) {
+        return FrameTxLib.traceBalanceAccount(i);
+    }
+
+    function traceBalanceBefore(uint256 i) external view returns (uint256) {
+        return FrameTxLib.traceBalanceBefore(i);
+    }
+
+    function traceBalanceAfter(uint256 i) external view returns (uint256) {
+        return FrameTxLib.traceBalanceAfter(i);
+    }
+
+    function traceStorageAccount(uint256 i) external view returns (address) {
+        return FrameTxLib.traceStorageAccount(i);
+    }
+
+    function traceStorageKey(uint256 i) external view returns (uint256) {
+        return FrameTxLib.traceStorageKey(i);
+    }
+
+    function traceStorageBefore(uint256 i) external view returns (uint256) {
+        return FrameTxLib.traceStorageBefore(i);
+    }
+
+    function traceStorageAfter(uint256 i) external view returns (uint256) {
+        return FrameTxLib.traceStorageAfter(i);
+    }
+
+    function traceDeployedAccount(uint256 i) external view returns (address) {
+        return FrameTxLib.traceDeployedAccount(i);
+    }
+
+    function traceDeployedCodeHash(uint256 i) external view returns (bytes32) {
+        return FrameTxLib.traceDeployedCodeHash(i);
+    }
+
+    function traceEventCount() external view returns (uint256) {
+        return FrameTxLib.traceEventCount();
+    }
+
+    function traceEventEmitter(uint256 i) external view returns (address) {
+        return FrameTxLib.traceEventEmitter(i);
+    }
+
+    function traceEventTopicCount(uint256 i) external view returns (uint256) {
+        return FrameTxLib.traceEventTopicCount(i);
+    }
+
+    function traceEventTopic0(uint256 i) external view returns (bytes32) {
+        return FrameTxLib.traceEventTopic0(i);
+    }
+
+    function traceEventTopic1(uint256 i) external view returns (bytes32) {
+        return FrameTxLib.traceEventTopic1(i);
+    }
+
+    function traceEventTopic2(uint256 i) external view returns (bytes32) {
+        return FrameTxLib.traceEventTopic2(i);
+    }
+
+    function traceEventTopic3(uint256 i) external view returns (bytes32) {
+        return FrameTxLib.traceEventTopic3(i);
+    }
+
+    function traceEventDataLength(uint256 i) external view returns (uint256) {
+        return FrameTxLib.traceEventDataLength(i);
+    }
+
+    function traceGasPreCharge() external view returns (uint256) {
+        return FrameTxLib.traceGasPreCharge();
+    }
+
+    function traceGasPayer() external view returns (address) {
+        return FrameTxLib.traceGasPayer();
+    }
+
+    function storageValueBefore(address account, uint256 key) external view returns (uint256) {
+        return FrameTxLib.storageValueBefore(account, key);
+    }
+
+    function storageValueAfter(address account, uint256 key) external view returns (uint256) {
+        return FrameTxLib.storageValueAfter(account, key);
+    }
+
+    function accountBalanceBefore(address account) external view returns (uint256) {
+        return FrameTxLib.accountBalanceBefore(account);
+    }
+
+    function accountBalanceAfter(address account) external view returns (uint256) {
+        return FrameTxLib.accountBalanceAfter(account);
+    }
+
+    function accountCodeHashBefore(address account) external view returns (bytes32) {
+        return FrameTxLib.accountCodeHashBefore(account);
+    }
+
+    function accountCodeHashAfter(address account) external view returns (bytes32) {
+        return FrameTxLib.accountCodeHashAfter(account);
+    }
+
+    function accountStorageDiffCount(address account) external view returns (uint256) {
+        return FrameTxLib.accountStorageDiffCount(account);
+    }
+
+    function accountStorageDiffIndex(address account, uint256 localIndex)
+        external
+        view
+        returns (uint256)
+    {
+        return FrameTxLib.accountStorageDiffIndex(account, localIndex);
+    }
+
+    function accountEventCount(address account) external view returns (uint256) {
+        return FrameTxLib.accountEventCount(account);
+    }
+
+    function accountEventIndex(address account, uint256 localIndex)
+        external
+        view
+        returns (uint256)
+    {
+        return FrameTxLib.accountEventIndex(account, localIndex);
+    }
+
+    function accountDiffFlags(address account) external view returns (uint256) {
+        return FrameTxLib.accountDiffFlags(account);
+    }
+
+    function eventDataSlice(uint256 eventIndex, uint256 dataOffset, uint256 length)
+        external
+        view
+        returns (bytes memory)
+    {
+        return FrameTxLib.eventDataSlice(eventIndex, dataOffset, length);
+    }
+
+    function eventData(uint256 eventIndex) external view returns (bytes memory) {
+        return FrameTxLib.eventData(eventIndex);
     }
 
     function approve(uint256 scope) external {

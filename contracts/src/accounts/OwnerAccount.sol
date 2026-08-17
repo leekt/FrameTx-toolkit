@@ -6,12 +6,11 @@ import {FrameTxLib} from "../frame/FrameTxLib.sol";
 /// @title  OwnerAccount
 /// @author taek <leekt216@gmail.com>
 /// @notice The canonical single-owner EIP-8141 smart account.
-/// @dev    The account does NOT verify a signature. The protocol verified every
-///         SECP256K1 / P256 entry in `tx.signatures` against the canonical
-///         signature hash before frame 0 ran. The account only asks *which key
-///         signed* (SIGPARAM) and applies an authorisation policy: "signature 0
-///         must come from the owner, over this transaction". That policy is the
-///         whole contract.
+/// @dev    The account does NOT verify a signature. Before frame 0, the protocol
+///         verified every SECP256K1 / P256 entry against either the canonical
+///         transaction hash or its explicit digest. The account asks which key
+///         signed and requires the canonical-hash case: "signature 0 must come
+///         from the owner, over this transaction". That policy is the contract.
 contract OwnerAccount {
     /// @dev Slot 0. The key authorised to spend from this account.
     address public owner;

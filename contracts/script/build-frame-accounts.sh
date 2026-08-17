@@ -20,11 +20,11 @@ if [[ ! -x "$SOLC" ]]; then
     exit 1
 fi
 
-# Confirm this really is the patched compiler before trusting its output.
-if ! echo 'contract T{function f() external{assembly{approvetx(0,0,3)}}}' > /tmp/.frame_probe.sol ||
+# Confirm this compiler includes the tooling-fixture opcodes, not only the baseline fork.
+if ! echo 'contract T{function a() external{assembly{approvetx(0,0,3)}}function t() external view returns(uint x){assembly{x:=txtrace(0,0)}}}' > /tmp/.frame_probe.sol ||
    ! "$SOLC" --experimental --evm-version @future --bin /tmp/.frame_probe.sol >/dev/null 2>&1; then
-    echo "$SOLC does not support the EIP-8141 opcodes (approvetx not found)." >&2
-    echo "You are probably pointing at a stock solc." >&2
+    echo "$SOLC does not support the tooling-fixture frame-opcode profile." >&2
+    echo "You may be pointing at stock solc or the clean baseline submodule pin." >&2
     rm -f /tmp/.frame_probe.sol
     exit 1
 fi
@@ -37,8 +37,8 @@ for sol in "$(dirname "${BASH_SOURCE[0]}")/../src/accounts"/*.sol \
            "$(dirname "${BASH_SOURCE[0]}")/../src/frame"/*.sol; do
     name="$(basename "$sol" .sol)"
     echo "compiling $name"
-    # --no-cbor-metadata keeps the output reproducible: the CBOR blob encodes the
-    # compiler build, so without it the bytecode changes on every rebuild.
+    # Excluding CBOR makes byte counts refer only to executable code; metadata
+    # otherwise changes when the compiler identity or source metadata changes.
     "$SOLC" --experimental --evm-version @future --optimize --no-cbor-metadata \
             --bin --bin-runtime --abi -o "$OUT/$name" --overwrite "$sol" >/dev/null
     found=$((found + 1))

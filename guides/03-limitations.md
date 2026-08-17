@@ -3,22 +3,63 @@
 Read this before planning work on top of the toolkit. Some of these will change what you
 can attempt.
 
-## The big one: no devnet path
+## The big one: only the baseline wire path exists
 
-**A frame transaction still cannot be submitted to a running node**, though the pool now
-accepts them internally. Frame transactions can be *executed and inspected* through the Go
-test harness; they cannot yet be gossiped or sent over RPC.
+With `--enable-frame-transactions`, the patched Foundry commit accepts a baseline
+type-`0x06` envelope through Anvil's `eth_sendRawTransaction`, mines it, and executes its
+frames. This is a real local-node path, not a Go-only harness. It does not implement the
+EIP-8250/8272/7906-inspired fixture fields on the wire, public-mempool policy, or peer gossip.
 
 | Status | Component | Detail |
 |---|---|---|
-| Partial | Transaction pool | `core/txpool/frame_validation.go` implements the spec's structural rules: validation-prefix shape matching, `MAX_VERIFY_GAS` (counting signature verification), no atomic batch in the prefix, no VERIFY frame after it. A self-relay transaction reaches the pending queue. |
-| Missing | Prefix simulation | The spec also requires simulating the prefix and rejecting banned opcodes, storage reads outside `tx.sender`, state writes and calls to non-existent contracts. Without it, an accepted transaction can still be invalidated by third-party state changes — the DoS vector the trace rules exist to close. |
-| Missing | Paymaster support | The `[only_verify, pay]` prefix is recognised but rejected (`ErrFramePaymaster`). Admitting it safely needs per-payer reservation accounting plus canonical-paymaster code matching, neither of which exists. |
-| Missing | JSON-RPC | `internal/ethapi/` — no way to send or read one over RPC. |
-| Missing | Networking | `eth/protocols/eth/` — no gossip, no blob sidecar wrapper. |
+| Working-tree only | Baseline Anvil RPC | Decode, validate, mine, retrieve, trace, and replay raw scalar-nonce type-`0x06` transactions; atomic batches, default code, canonical raw-byte fork replay, and transaction-hash forks are covered by `foundry/crates/anvil/tests/it/frame_tx.rs`. |
+| Working-tree only | Frame receipts | Consensus receipt encoding and trie roots include the payer and ordered `[status, gas_used, logs]` frame results; RPC receipts expose these as `payer` and `frameReceipts`. |
+| Working-tree only | Expiry activation | Enabled nodes install the canonical verifier at `0x8141` after source replay, and memory/fork resets restore it. |
+| Missing | Fixture-inspired wire/state integration | No keyed-nonce list/state, recent-root list/verification, trace construction, or `POST_TX` suffix execution. Those fields exist only in synthetic `setFrameTx` fixtures. |
+| Missing | Prefix policy | The validation-prefix simulation and DoS rules from the spec are not implemented as a public transaction-pool admission policy. |
+| Partial | Sponsorship RPC path | A raw-RPC default-code sponsor is covered end to end; a contract `pay` frame and canonical-paymaster pool accounting are not. |
+| Partial | EIP-7997 factory | Anvil already installs the exact deterministic-factory address and runtime. It is available independently of Glamsterdam and has nonce `0`, not the activation-state nonce `1`. |
+| Working-tree only | EIP-7819 `SETDELEGATE` | Solc `@future`, REVM, and explicit Anvil activation cover exact location/code, Prague gating, gas/refund, static mode, collision, clearing, nonce, warmth, reset, and immediate-effect behavior. |
+| Working-tree only | EIP-7851 code-controlled delegation | Solc `@future`, REVM, and explicit Ethereum-only Anvil activation cover both designation versions, redelegation, sender and authorization rejection, gas/static/revert behavior, simulations, impersonation, reset, and Frame coexistence. Opcode `0xf7` is a non-normative local assignment because upstream remains TBD. |
+| Working-tree only | EIP-8151 code-restricted ECRecover | Solc `@future`, REVM, and explicit Ethereum-only Foundry/Anvil activation cover exact raw-code eligibility, malformed input, output, gas, warmth, rollback, replay, overrides, access-list inference, reset, and EIP-7851 transitions. No named-fork activation or official EEST vectors exist. |
+| Missing | Networking | No frame-transaction gossip or blob-sidecar wrapper is implemented. |
 
-RPC is the cheapest remaining step to an end-to-end demo. Prefix simulation is the largest,
-and paymaster support depends on it.
+The exact Anvil and REVM commits are recorded in
+[VERSIONS.md](../VERSIONS.md#reproducibility-status).
+
+## Activation and execution profiles
+
+Frame transactions are off by default. `--enable-frame-transactions` enables the scalar
+profile only for Ethereum hard forks before Amsterdam. OP Stack, Tempo, Monad, and Amsterdam
+state-gas profiles reject type `0x06` at submission instead of allowing it to reach a
+partially compatible executor.
+
+EIP-7819 is separately disabled by default. `--enable-eip7819` activates opcode `0xf6` only
+under Prague-or-later rules; pre-Prague execution still halts as not activated. The flag does
+not enable Frame transactions, and `--enable-frame-transactions` does not enable EIP-7819.
+Solc exposes the matching `setdelegate(salt, target)` builtin only under experimental
+`@future`, because the draft still has no assigned compiler fork.
+
+EIP-7851 is also disabled by default. `--enable-eip7851` is accepted only on Anvil's canonical
+Ethereum execution profile and requires Prague-or-later rules. Solc exposes
+`setselfdelegate(target)` only under `@future`. The pinned EIP does not assign an opcode; this
+toolkit uses provisional `0xf7`, so emitted bytecode is not portable and must be regenerated
+when upstream assigns a byte. The EIP-7851 flag does not imply either EIP-7819 or Frame
+activation, though all three can coexist on the supported Ethereum profile.
+
+EIP-8151 is likewise disabled by default. `--enable-eip8151` requires Prague-or-later rules
+and Anvil's canonical Ethereum profile. It changes precompile `0x01` from a stateless ECRecover
+to a stateful raw-code check, so Foundry also exposes `enable_eip8151 = true` and the matching
+CLI flag on shared EVM options. The proposal has no assigned hard fork; Prague is the minimum
+toolkit execution baseline, not a claim of protocol inclusion. Solc classifies high-level
+`ecrecover` as `view` only under `@future` so purity analysis and SMT modeling account for this
+state dependency. This flag is independent of Frame, EIP-7819, and EIP-7851 activation.
+
+Only raw signed envelopes are accepted. Object-form requests containing `type: 0x6` or
+`frames` are rejected, so `eth_call` cannot accidentally reinterpret a Frame transaction as
+an ordinary call. `trace_rawTransaction` and `trace_replayTransaction` do execute the raw
+Frame path. On transaction-hash forks, Anvil fetches and hash-checks canonical raw bytes
+instead of trying to reconstruct unknown typed fields from JSON-RPC.
 
 ## Deliberate divergences
 
@@ -30,25 +71,22 @@ function or identifier name. The opcode byte `0xaa` is unchanged, so bytecode is
 only the mnemonic differs.
 
 `approve` remains usable as an ordinary identifier, even on `@future`. There is a regression
-test pinning that: `test/libyul/yulSyntaxTests/frame_transaction_approve_never_reserved.yul`.
+test pinning that at
+`solidity/test/libyul/yulSyntaxTests/frame_transaction_approve_never_reserved.yul`.
 
-### `SIGPARAM`'s copy form needs its own builtin
+### `SIGDATACOPY` is a separate native opcode
 
-`SIGPARAM` has an operand-dependent stack effect: params `0x00`–`0x03` take 2 operands and
-return 1, while param `0x04` takes 5 and returns none. Solidity's `InstructionInfo` is
-fixed-arity and cannot express that, so only the metadata form is the `sigparam` builtin.
+The original draft overloaded `SIGPARAM`: params `0x00`–`0x03` took 2 operands and returned
+1, while param `0x04` took 5 and returned none. Solidity's `InstructionInfo` and revm's
+opcode table both require one fixed stack effect per opcode.
 
-The copy form is exposed as a separate builtin,
-`sigdatacopy(signatureIndex, memOffset, dataOffset, length)`, which hardcodes the param and
-emits `PUSH1 0x04 SWAP1 SIGPARAM`. Unlike the earlier `verbatim_5i_0o(hex"b4", ...)`
-workaround, it works in inline assembly, where `verbatim` is unavailable, and it carries
-precise side-effect and view/pure metadata instead of verbatim's worst-case assumptions.
-The split is exactly what the suggested opcode fix below would make unnecessary.
+The confirmed split keeps `SIGPARAM` metadata-only and assigns `SIGDATACOPY` to `0xb5` with
+fixed arity 4. Its order is `sigdatacopy(memOffset, dataOffset, length, signatureIndex)`,
+exactly parallel to `FRAMEDATACOPY`.
 
-### Why this is worth raising upstream
+### Why the split matters
 
-`SIGPARAM` appears to be the first EVM instruction whose **stack arity depends on a runtime
-operand value**. Ethereum has consistently gone the other way, at real cost:
+Ethereum has consistently encoded stack shape in the opcode rather than a runtime operand:
 
 - `LOG0`–`LOG4` is the identical problem — an operation with a variable number of stack
   items — solved with **five separate opcodes** (arity 2, 3, 4, 5, 6) rather than one `LOG`
@@ -63,29 +101,17 @@ Both mature implementations encode this assumption structurally: solc's `Instruc
 `int args; int ret;` and revm's opcode table declares `stack_io(n, m)`. Neither schema
 can represent a variable-arity opcode, and both have covered every opcode across every fork.
 
-EIP-8141 also breaks its **own** convention here: it allocates two separate opcodes for frame
+The former EIP-8141 shape also broke its **own** convention: it allocated two opcodes for frame
 data (`FRAMEDATALOAD` `0xb1`, `FRAMEDATACOPY` `0xb2`, mirroring `CALLDATALOAD` /
-`CALLDATACOPY`) but overloads a single opcode for signature data. `0xb5` onward is
-unallocated, so there is no opcode-space pressure justifying the difference.
-
-**Suggested fix:** split the copy form into its own opcode, e.g. `SIGDATACOPY` at `0xb5` with
-fixed arity 4 (`memOffset, dataOffset, length, signatureIndex`) — exactly parallel to
-`FRAMEDATACOPY`. This costs one opcode from an unallocated range and makes the instruction
-set uniform and representable in every fixed-arity toolchain.
-
-The cost of not doing so is not hypothetical: it produced two defects in this toolkit. solc
-can only expose one of the two forms as a builtin, and revm's implementation needed an explicit
-stack-depth guard where `minStack` could only promise two operands — without it, three bytes
-of bytecode panicked the node.
+`CALLDATACOPY`) but overloaded one opcode for signature metadata and data. The native split
+makes the instruction set uniform and statically representable.
 
 **Forward compatibility with EOF is the strongest form of this argument.** The EVM tolerates
 a runtime-determined arity today only because it has no bytecode validation: stack underflow
 is a runtime halt, which is why a hand-written depth check can paper over it. EOF reverses
 that — [EIP-5450](https://eips.ethereum.org/EIPS/eip-5450) requires the stack height at every
 instruction to be **statically determinable at validation time** so underflowing code can be
-rejected before execution. An instruction whose arity depends on a stack value is not
-expressible under that rule. As specified, `SIGPARAM` could not appear in validated EOF code
-without either excluding it or weakening EOF validation.
+rejected before execution. The fixed-arity split remains expressible under that rule.
 
 **Prior art, for whoever picks this up.** Instructions with variable arity are common, but in
 every statically-verified VM the count comes from an *immediate in the instruction stream*,
@@ -110,10 +136,9 @@ stack-determined-arity opcode later removed it.
 ### `APPROVE` in a STATICCALL context
 
 The spec has `APPROVE` mutating state (nonce increment, payer, `max_cost` collection) inside
-a frame it also describes as a `STATICCALL`. This implementation resolves it the way the
-spec text intends: `APPROVE`'s writes go directly to the StateDB and bypass the
-interpreter's write-protection guards, making it the sole permitted state change in a VERIFY
-frame.
+a frame it also describes as a `STATICCALL`. The working-tree revm implementation permits
+the opcode's transaction-scoped approval update while ordinary state-changing opcodes remain
+blocked, making `APPROVE` the sole permitted mutation in a VERIFY frame.
 
 Other clients may diverge here until the authors clarify. If you are writing something that
 depends on the exact boundary, treat it as unsettled.
@@ -123,17 +148,25 @@ depends on the exact boundary, treat it as unsettled.
 - **No Solidity-level syntax.** The opcodes are inline-assembly and Yul builtins only. There
   is no `block.`-style global, and no high-level `approve` statement. Everything goes through
   `assembly {}`.
-- **Semantic tests not run.** solc's semantic test suite needs `libevmone`, which is not
-  installed; 1509 tests are skipped. Syntax, view/pure and Yul tests all pass.
-- **The `@future` EVM version is a placeholder.** When EIP-8141 gets a real fork name, the
-  gate in `liblangutil/EVMVersion.h` (`hasFrameTransaction()`) should move to it.
+- **Semantic and solver-backed tests are environment-limited.** solc's semantic suite needs
+  `libevmone`, which is not installed. The latest non-semantic, no-SMT runs passed 5068 tests
+  at the default EVM and 5039 at `@future`; version-inapplicable and semantic suites were
+  skipped. EIP-8151's SMT fixtures compile, but this build has `USE_Z3=OFF` and no Z3/cvc5, so
+  solver assertions were not run. Syntax, view/pure, gas, object-compiler, side-effect, and
+  Yul-interpreter EIP-7819/EIP-7851 fixtures passed.
+- **The `@future` EVM version is a placeholder.** When EIP-8141, EIP-7819, EIP-7851, or
+  EIP-8151 gets a real fork assignment, its gate in `liblangutil/EVMVersion.h` should move from
+  `future()`.
 
 ## Spec status
 
 EIP-8141 is a **Draft** (created 2026-01-29). It is not final and details have already
 shifted — several third-party write-ups describe an older opcode set (`TXPARAMLOAD` /
-`TXPARAMSIZE` / `TXPARAMCOPY`) and inverted `APPROVE` scope values. **Always check the spec
-in `ethereum/EIPs`, not a summary.**
+`TXPARAMSIZE` / `TXPARAMCOPY`) and inverted `APPROVE` scope values. Check both upstream and
+the local implementation overlay rather than relying on a summary.
 
-Run `tools/check-spec-drift.sh` to see whether the pinned spec has moved, and consult
-[VERSIONS.md](../VERSIONS.md) for the map from spec areas to affected code.
+Run `tools/check-spec-drift.sh` to compare current upstream EIP-8141 with the exact upstream
+source pin. [`spec/EIP8141.md`](../spec/EIP8141.md) contains the native-SIGDATACOPY
+normative overlay and a separate non-normative tooling-fixture appendix; neither is the
+checker's byte-for-byte baseline. Consult [VERSIONS.md](../VERSIONS.md) for the map from
+spec areas to affected code.

@@ -3,7 +3,7 @@
 // The frame opcodes are emitted with `verbatim_*`, so this file compiles with any
 // stock solc >= 0.8.5. No compiler fork, no --evm-version flag, no builtin names.
 // See account-builtins.yul for the same account written with the patched-solc
-// builtins, and README.md for a side-by-side of the two.
+// builtins, and contracts/docs/02-yul-minimal-account.md for a side-by-side.
 //
 // Compile:
 //   solc --strict-assembly --bin account.yul
@@ -31,15 +31,20 @@ object "MinimalAccount" {
             //
             // This is the whole point of EIP-8141 account validation: the
             // protocol has ALREADY verified every secp256k1/P256 signature in the
-            // envelope against the canonical signature hash before this frame
-            // runs. The account never calls ecrecover; it only asks "which key
-            // signed?" and decides whether it trusts that key.
+            // envelope against its selected message before this frame runs. The
+            // account never calls ecrecover; it asks which key signed, then below
+            // requires that the selected message was this transaction's hash.
             let signer := verbatim_2i_1o(hex"b4", 0, 0x00)
+
+            // param = 0x02 -> msg. Zero is the reserved EVM representation for
+            // an empty msg, meaning this entry signed the canonical transaction
+            // hash. An explicit digest does not bind the frame list.
+            let signedThisTx := iszero(verbatim_2i_1o(hex"b4", 0, 0x02))
 
             // Read-only: this frame runs as a VERIFY frame, i.e. under
             // STATICCALL rules. SLOAD is fine; SSTORE / LOG / state-changing
             // calls are not. APPROVE is the single protocol-blessed exception.
-            if eq(sload(0), signer) {
+            if and(eq(sload(0), signer), signedThisTx) {
                 // APPROVE (0xaa), stack top-first: offset, length, scope
                 //   offset = 0, length = 0 -> empty return data (RETURN semantics)
                 //   scope  = 3             -> APPROVE_EXECUTION_AND_PAYMENT
