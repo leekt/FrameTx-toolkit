@@ -69,6 +69,91 @@ check.
 | [`guides/`](guides/) | Build, write, and what does not work yet |
 | [`tools/check-spec-drift.sh`](tools/check-spec-drift.sh) | Detect whether the spec moved |
 
+## Implementing and testing
+
+There are three useful testing levels. Start with ordinary policy tests, move to the patched
+Forge harness for real opcode execution, and use Anvil when transaction encoding, mining,
+receipts, or replay matter.
+
+### Policy-only tests
+
+Code under `contracts/src/policy` contains no frame opcodes and works with stock Foundry. This
+is the fastest loop for threshold, duplicate-signer, expiry, allowlist, and selector logic:
+
+```bash
+cd contracts
+forge test --match-path test/FrameAccountPolicy.t.sol
+```
+
+This does not execute frame opcodes or model a frame transaction.
+
+### Patched Forge harness
+
+This is the recommended account-development loop. It executes the real opcodes in patched
+REVM while the custom `setFrameTx` cheatcode supplies synthetic transaction context. It tests
+account validation and approval behavior, but not type-`0x06` wire encoding or pool admission.
+
+Build patched solc and Forge once. The first Foundry build compiles a large Rust dependency
+graph; later builds are incremental.
+
+```bash
+# From the repository root
+cmake -S solidity -B solidity/build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build solidity/build --target solc -j 8
+cargo build --manifest-path foundry/Cargo.toml --locked --bin forge
+```
+
+Then compile the frame contracts externally and run their tests:
+
+```bash
+cd contracts
+SOLC=../solidity/build/solc/solc ./script/build-frame-accounts.sh
+../foundry/target/debug/forge test
+```
+
+To add an account:
+
+1. Add `contracts/src/accounts/MyAccount.sol`. Inline assembly can use `approvetx`, `txparam`,
+   `frameparam`, `sigparam`, and the other toolkit builtins.
+2. Run `build-frame-accounts.sh`. It automatically compiles every `.sol` file under
+   `src/accounts` and `src/frame` with `--experimental --evm-version @future`.
+3. Copy `contracts/test/OwnerAccount.t.sol` as a starting point. Its `FrameTest` base provides
+   `deployAccount`, `verifyContext`, `assertApprovesFrame`, and `assertRefusesFrame`.
+4. Run the focused test:
+
+```bash
+../foundry/target/debug/forge test --match-contract MyAccountTest -vvv
+```
+
+### Full Anvil transactions
+
+Use this path to test canonical signed type-`0x06` envelopes, admission, execution, receipts,
+traces, and replay:
+
+```bash
+# From the repository root
+cargo build --manifest-path foundry/Cargo.toml --locked --bin anvil
+foundry/target/debug/anvil --hardfork prague --enable-frame-transactions
+```
+
+Anvil accepts frame transactions only as signed raw bytes through `eth_sendRawTransaction`.
+Object-form `eth_sendTransaction` and `eth_call` do not construct them, and `cast send` does
+not yet have a frame-transaction builder. The transaction types and signing examples live in:
+
+- `foundry/crates/primitives/src/transaction/frame.rs`
+- `foundry/crates/anvil/tests/it/frame_tx.rs`
+
+Run the existing end-to-end transaction suite without starting a separate node:
+
+```bash
+# From the repository root
+cargo test --manifest-path foundry/Cargo.toml --locked -p anvil --test it frame_tx
+```
+
+`--enable-frame-transactions` is independent of the experimental proposal flags. Add
+`--enable-eip7819`, `--enable-eip7851`, or `--enable-eip8151` when a test also needs those
+features.
+
 ## Guides
 
 1. **[Building](guides/01-build.md)** — the three-submodule build order and artifact generation.
@@ -135,7 +220,7 @@ straight to what a given change affects.
 ## Status
 
 Proof of concept. Compiler support, synthetic Forge execution, and the opt-in Anvil raw-RPC
-path are implemented in the current working trees, including nested receipts, parity traces,
+path are implemented in the published toolkit commits, including nested receipts, parity traces,
 canonical raw-byte fork replay, and expiry-verifier activation. Keyed-nonce/recent-root/POST_TX
 wire and state integration, public-pool policy, gossip, and Amsterdam state-gas compatibility
 are not implemented. Experimental EIP-7819, EIP-7851, and EIP-8151 compiler/VM and opt-in
