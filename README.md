@@ -7,6 +7,76 @@ worked smart accounts with tests.
 EIP-8141 is a **draft**. The upstream spec base and each published submodule gitlink are
 recorded at exact commits in [VERSIONS.md](VERSIONS.md).
 
+## Getting started
+
+Nothing gets installed: the patched solc and forge/anvil are built inside the submodules
+and invoked by path, so your existing `forge` (`~/.foundry/bin`) and any system solc stay
+untouched.
+
+**1. Get the stack** (the gitlinks pin the exact revm/foundry commits the tests expect;
+stale binaries built from older submodule states will fail):
+
+```bash
+git clone --recurse-submodules https://github.com/leekt/FrameTx-toolkit.git
+cd FrameTx-toolkit
+# or, updating an existing clone:
+git pull && git submodule update --init --recursive
+```
+
+**2. Build the two patched tools** (once, then incremental). Foundry's manifest pins the
+revm fork (all twelve crates) and the foundry-core fork (compilers with the `@future` EVM
+version) at exact commits, so cargo fetches the right sources automatically — you never
+build them separately unless you are hacking on them:
+
+```bash
+# patched solc  ->  solidity/build/solc/solc
+cmake -S solidity -B solidity/build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build solidity/build --target solc -j 8
+
+# patched forge + anvil  ->  foundry/target/debug/{forge,anvil}
+cargo build --manifest-path foundry/Cargo.toml --locked --bin forge --bin anvil
+```
+
+**3. Build and test — plain forge:**
+
+```bash
+cd contracts
+../foundry/target/debug/forge test      # builds everything, frame contracts included
+```
+
+The project's default profile sets `evm_version = "@future"`, `experimental = true`, and
+`solc = "../solidity/build/solc/solc"`, so the patched forge compiles `src/accounts`,
+`src/frame`, and `src/eips` natively and rebuilds them like any other source. Tests etch
+the resulting runtimes (`vm.getDeployedCode`) and drive them through the patched revm via
+the `setFrameTx` cheatcode.
+
+For real signed type-`0x06` envelopes, receipts, and state gas, run the patched node:
+
+```bash
+foundry/target/debug/anvil --enable-frame-transactions   # plus --enable-eip7819 / --enable-eip7851 / --enable-eip8151 as needed
+```
+
+**Coexisting with stock Foundry and solc:**
+
+- Stock `forge` still runs the policy layer through the `policy` profile:
+  `FOUNDRY_PROFILE=policy forge test --match-path test/FrameAccountPolicy.t.sol`.
+  Everything else — `@future` compilation, `setFrameTx`, the frame opcodes — needs the
+  patched binaries.
+- Don't `foundryup` or `cargo install` the fork — invoking by path is the design. If the
+  path gets old: `alias fforge=$PWD/foundry/target/debug/forge` (and `fanvil` likewise).
+- The patched forge runs any normal Foundry project unchanged. To use frame opcodes in
+  another project, replicate the pattern here: compile the opcode-bearing contracts
+  externally with `solidity/build/solc/solc --experimental --evm-version @future`, etch
+  the runtime in tests, and declare the `IFrameVm` interface field-for-field (copy
+  [`contracts/test/FrameTest.sol`](contracts/test/FrameTest.sol)).
+- Sanity checks: [guides/01-build.md](guides/01-build.md) has a probe contract confirming
+  you're on the right solc (stock solc lacks `approvetx`; an older fork lacks
+  `setdelegate`/`setselfdelegate`).
+  [`tools/check-spec-drift.sh`](tools/check-spec-drift.sh) tells you if upstream EIP-8141
+  moved off the pin.
+
+Prerequisites and the full build order live in [guides/01-build.md](guides/01-build.md).
+
 ## EIP roadmap
 
 | EIP | Change | Target fork | Inclusion status | Toolkit support |
@@ -105,23 +175,23 @@ cmake --build solidity/build --target solc -j 8
 cargo build --manifest-path foundry/Cargo.toml --locked --bin forge
 ```
 
-Then compile the frame contracts externally and run their tests:
+Then run the tests; the patched forge compiles the frame contracts natively (the project's
+default profile sets `evm_version = "@future"`, `experimental = true`, and the patched solc
+path):
 
 ```bash
 cd contracts
-SOLC=../solidity/build/solc/solc ./script/build-frame-accounts.sh
 ../foundry/target/debug/forge test
 ```
 
 To add an account:
 
 1. Add `contracts/src/accounts/MyAccount.sol`. Inline assembly can use `approvetx`, `txparam`,
-   `frameparam`, `sigparam`, and the other toolkit builtins.
-2. Run `build-frame-accounts.sh`. It automatically compiles every `.sol` file under
-   `src/accounts` and `src/frame` with `--experimental --evm-version @future`.
-3. Copy `contracts/test/OwnerAccount.t.sol` as a starting point. Its `FrameTest` base provides
+   `frameparam`, `sigparam`, and the other toolkit builtins; forge builds it like any other
+   source.
+2. Copy `contracts/test/OwnerAccount.t.sol` as a starting point. Its `FrameTest` base provides
    `deployAccount`, `verifyContext`, `assertApprovesFrame`, and `assertRefusesFrame`.
-4. Run the focused test:
+3. Run the focused test:
 
 ```bash
 ../foundry/target/debug/forge test --match-contract MyAccountTest -vvv

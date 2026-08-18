@@ -233,6 +233,6 @@ refer only to executable runtime bytecode:
 solc --experimental --evm-version @future --bin-runtime --optimize --no-cbor-metadata Account.sol
 ```
 
-For deployment you generally *want* metadata. The toolkit omits it only from generated
-`out-frame` artifacts so their byte counts and bytecode comparisons have one unambiguous
+For deployment you generally *want* metadata. Byte-count claims in these docs refer to
+metadata-free builds (`--no-cbor-metadata`) so bytecode comparisons have one unambiguous
 meaning; no current artifact-size claim includes a CBOR trailer.

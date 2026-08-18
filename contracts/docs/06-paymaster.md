@@ -190,13 +190,13 @@ allowance pull, tight expiry) are out of scope here.
 
 ```bash
 cd contracts
-SOLC=../solidity/build/solc/solc ./script/build-frame-accounts.sh
+../foundry/target/debug/forge build
 ```
 
-Compiles with **zero errors** (one warning, the standard "this is a pre-release compiler
-version" notice). The current generated runtime is **878 bytes** (1756 hex characters) at
-`out-frame/SponsoringPaymaster/SponsoringPaymaster.bin-runtime`. It was generated with
-`--no-cbor-metadata`, so the size excludes a metadata trailer.
+Compiles with **zero errors** (plus the standard "this is a pre-release compiler
+version" notice). The current generated runtime is **878 bytes** (1756 hex characters) in
+`out/SponsoringPaymaster.sol/SponsoringPaymaster.json` (`deployedBytecode`). It is built with
+`cbor_metadata = false`, so the size excludes a metadata trailer.
 
 The three `pay`-path opcodes are visible in it:
 

@@ -12,8 +12,9 @@ alongside the submodule state that implements the current toolkit.
 | **EIP-7851 upstream base** | `07f3bb3626d4db1f2ac501734fec5b3d32e185c5` | 2026-05-14 | [ethereum/EIPs](https://github.com/ethereum/EIPs) — `EIPS/eip-7851.md` |
 | **EIP-8151 upstream base** | `bf7a4067f263bf7ce01c1511de48473e281d885d` | 2026-07-27 | [ethereum/EIPs](https://github.com/ethereum/EIPs) — `EIPS/eip-8151.md` |
 | **revm gitlink** | `7f08164fc954021eae96bbc75c675486ff775f82` | 2026-08-18 | [leekt/revm](https://github.com/leekt/revm) — branch `feat/native-sigdatacopy` |
-| **foundry gitlink** | this change set's working tree; gitlink advances on commit | 2026-08-18 | [leekt/foundry](https://github.com/leekt/foundry) |
+| **foundry gitlink** | `fcec1e9335ffd966da07c524080bb85b9b3e50d5` | 2026-08-18 | [leekt/foundry](https://github.com/leekt/foundry) — branch `feat/frame-tx-txparam-context` |
 | **solidity gitlink** | `bd2feb3527039628a9fa8a675e432ea2cf5975ec` | 2026-08-17 | [leekt/solidity](https://github.com/leekt/solidity) — branch `feat/eip8141-frame-opcodes` (no change needed for the master-spec rebase: selectors are runtime data) |
+| **foundry-core gitlink** | `3a0ad16e2c154c8131fd2791f418f561e1347ef2` | 2026-08-18 | [leekt/foundry-core](https://github.com/leekt/foundry-core) — branch `feat/evm-version-future`, based on `foundry-rs/foundry-core@d61ff900` |
 
 [`spec/EIP8141.md`](spec/EIP8141.md) is not an exact vendored snapshot. Its normative body is
 the upstream base above with the native `SIGDATACOPY` split applied exactly as in
@@ -29,12 +30,19 @@ does not claim transaction-wire support for those extensions.
 ## Reproducibility status
 
 A clone of this root revision initializes the exact submodule commits recorded by its
-gitlinks, builds patched solc, and builds Foundry against its immutable REVM pin.
+gitlinks, builds patched solc, and builds Foundry against its immutable REVM and
+foundry-core pins.
 
-Three forks, and deliberately not more: `foundry` patches all twelve revm crates to the
-`revm` fork at `7f08164fc954021eae96bbc75c675486ff775f82` and patches no other upstream
-package. `Cargo.lock` records that same immutable revision, which is the commit the `revm`
-gitlink pins. Foundry disables the now-unused `alloy-evm/rpc` feature in two crates
+Four forks, and deliberately not more: `foundry` patches all twelve revm crates to the
+`revm` fork at `7f08164fc954021eae96bbc75c675486ff775f82`, and repoints its existing
+foundry-core patch (`foundry-compilers`, `foundry-block-explorers`, `foundry-fork-db`) to
+the `foundry-core` fork, whose only change is the experimental `@future` EVM version in
+the compilers crates. That is what lets `forge build` compile the frame contracts natively
+(`evm_version = "@future"` plus `experimental = true` drive the patched solc over standard
+JSON — solc's `settings.experimental` and foundry's `experimental` config key already
+existed upstream). `Cargo.lock` records those immutable revisions, which are the commits
+the `revm` and `foundry-core` gitlinks pin. Foundry disables the now-unused
+`alloy-evm/rpc` feature in two crates
 because that upstream adapter constructs `TxEnv` directly and cannot initialize EIP-7851's
 authentication marker. See
 [guides/04-foundry.md](guides/04-foundry.md#how-the-context-reaches-the-evm) for why that
@@ -109,7 +117,11 @@ Foundry building revm from the sibling submodule path.
 
 | Suite | Result |
 |---|---|
-| `contracts/` — debug `forge test` | 99 passed, 0 failed, 0 skipped |
+| `contracts/` — debug `forge test`, native `@future` build (no external artifact script) | 99 passed, 0 failed, 0 skipped |
+| `contracts/` — stock forge 1.7.1, `FOUNDRY_PROFILE=policy` | 14 passed, 0 failed |
+| `contracts/` — native artifacts byte-identical to the retired script's (`OwnerAccount` 435 B, `MultisigAccount` 463 B, `SessionKeyAccount` 1448 B, `SponsoringPaymaster` 878 B) | Verified |
+| `foundry` — `foundry-config --lib` | 231 passed, 0 failed |
+| `foundry-core` — `foundry-compilers-artifacts-solc` EVM-version tests | 2 passed, 0 failed |
 | `revm` — `cargo test --workspace --lib` | 520 passed, 0 failed |
 | `foundry` — `foundry-primitives --lib` | 62 passed, 0 failed |
 | `foundry` — anvil `frame_tx` backend units | 42 passed, 0 failed |

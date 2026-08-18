@@ -125,11 +125,11 @@ interface IFrameVm {
 
 // Base class for testing EIP-8141 accounts under Foundry.
 //
-// Accounts that use the frame opcodes cannot be compiled by Foundry: its
-// evm_version enum does not accept the experimental future version. They are
-// built by script/build-frame-accounts.sh with the patched solc and installed
-// here with vm.etch. Execution itself is real -- the patched revm implements the
-// opcodes, and the frame context comes from the setFrameTx cheatcode.
+// The patched forge compiles the frame contracts natively (the project's
+// default profile drives the patched solc at the experimental future EVM
+// version), and these helpers install the resulting runtimes with vm.etch.
+// Execution itself is real -- the patched revm implements the opcodes, and the
+// frame context comes from the setFrameTx cheatcode.
 abstract contract FrameTest is Test {
     IFrameVm internal constant fvm = IFrameVm(address(vm));
 
@@ -149,27 +149,31 @@ abstract contract FrameTest is Test {
     bytes32 internal constant LEGACY_NONCE_KEYS_HASH =
         0xada5013122d395ba3c54772283fb069b10426056ef8ca54750cb9bb552a59e7d;
 
-    /// Installs an account's compiled runtime, built by build-frame-accounts.sh.
-    /// Fails loudly rather than silently etching nothing if the artifact is absent.
+    // Installs an account's compiled runtime from forge's own artifacts: the
+    // frame contracts are compiled natively by the patched forge under the
+    // experimental future-EVM profile. Fails loudly rather than silently
+    // etching nothing if the artifact is absent.
     function deployAccount(string memory name, address at) internal returns (address) {
-        string memory path = string.concat(vm.projectRoot(), "/out-frame/", name, "/", name, ".bin-runtime");
-        string memory hexCode = vm.readFile(path);
-        bytes memory runtime = vm.parseBytes(string.concat("0x", hexCode));
+        bytes memory runtime = vm.getDeployedCode(string.concat(name, ".sol:", name));
         require(runtime.length > 0, string.concat("empty artifact for ", name));
         vm.etch(at, runtime);
         return at;
     }
 
-    /// Deploys an account by running its real constructor, from the `.bin` artifact.
+    /// Deploys an account by running its real constructor, from the creation
+    /// artifact.
     ///
     /// `deployAccount` etches runtime code, which leaves storage empty and every
-    /// `immutable` as the zero placeholder solc emits into `--bin-runtime`. An
+    /// `immutable` as the zero placeholder in the artifact's deployed bytecode. An
     /// account configured through immutables (SponsoringPaymaster) can only be set up
     /// this way; for one with a constructor it also beats hand-hashing mapping slots
     /// into `vm.store`, where a wrong slot silently makes every assertion vacuous.
-    function deployAccountWithArgs(string memory name, bytes memory args) internal returns (address account) {
-        string memory path = string.concat(vm.projectRoot(), "/out-frame/", name, "/", name, ".bin");
-        bytes memory initcode = abi.encodePacked(vm.parseBytes(string.concat("0x", vm.readFile(path))), args);
+    function deployAccountWithArgs(string memory name, bytes memory args)
+        internal
+        returns (address account)
+    {
+        bytes memory initcode =
+            abi.encodePacked(vm.getCode(string.concat(name, ".sol:", name)), args);
         assembly {
             account := create(0, add(initcode, 0x20), mload(initcode))
         }
@@ -235,7 +239,10 @@ abstract contract FrameTest is Test {
     /// Synthetic secp256k1 entry modeling the normative canonical-hash case.
     /// `setFrameTx` trusts these fields and performs no cryptographic verification.
     function secpSig(address signer) internal pure returns (IFrameVm.FrameTxSignature memory) {
-        return IFrameVm.FrameTxSignature({scheme: 1, signer: signer, msgHash: bytes32(0), signature: ""});
+        return
+            IFrameVm.FrameTxSignature({
+                scheme: 1, signer: signer, msgHash: bytes32(0), signature: ""
+            });
     }
 
     /// Calls the account as the ENTRY_POINT would for its VERIFY frame.
@@ -244,7 +251,9 @@ abstract contract FrameTest is Test {
     }
 
     /// Asserts the account approves under this context.
-    function assertApproves(address account, IFrameVm.FrameTx memory ctx, string memory reason) internal {
+    function assertApproves(address account, IFrameVm.FrameTx memory ctx, string memory reason)
+        internal
+    {
         fvm.setFrameTx(ctx);
         assertTrue(callAccount(account), reason);
         fvm.clearFrameTx();
@@ -254,7 +263,9 @@ abstract contract FrameTest is Test {
     ///
     /// A refusal and a wrongly-scoped APPROVE both surface as a failed call, so
     /// pair this with a positive case that pins the scope.
-    function assertRefuses(address account, IFrameVm.FrameTx memory ctx, string memory reason) internal {
+    function assertRefuses(address account, IFrameVm.FrameTx memory ctx, string memory reason)
+        internal
+    {
         fvm.setFrameTx(ctx);
         assertFalse(callAccount(account), reason);
         fvm.clearFrameTx();
@@ -267,21 +278,28 @@ abstract contract FrameTest is Test {
     /// dispatcher must be driven through this form or every assertion about it is
     /// vacuous. Requiring a selector is what stops an unset `data` from silently
     /// degrading back into that.
-    function callAccountFrame(address account, IFrameVm.FrameTx memory ctx) internal returns (bool ok) {
+    function callAccountFrame(address account, IFrameVm.FrameTx memory ctx)
+        internal
+        returns (bool ok)
+    {
         bytes memory data = ctx.frames[ctx.frameIndex].data;
         require(data.length >= 4, "frame data must carry a selector");
         (ok,) = account.call(data);
     }
 
     /// `assertApproves` driving the account with its frame data.
-    function assertApprovesFrame(address account, IFrameVm.FrameTx memory ctx, string memory reason) internal {
+    function assertApprovesFrame(address account, IFrameVm.FrameTx memory ctx, string memory reason)
+        internal
+    {
         fvm.setFrameTx(ctx);
         assertTrue(callAccountFrame(account, ctx), reason);
         fvm.clearFrameTx();
     }
 
     /// `assertRefuses` driving the account with its frame data.
-    function assertRefusesFrame(address account, IFrameVm.FrameTx memory ctx, string memory reason) internal {
+    function assertRefusesFrame(address account, IFrameVm.FrameTx memory ctx, string memory reason)
+        internal
+    {
         fvm.setFrameTx(ctx);
         assertFalse(callAccountFrame(account, ctx), reason);
         fvm.clearFrameTx();

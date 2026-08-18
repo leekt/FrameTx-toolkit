@@ -91,7 +91,7 @@ yourself with the corresponding count wrapper first.
 ## Testing
 
 `test/FrameTxLib.t.sol` runs every wrapper's positive path against the real opcodes through
-`FrameTxLibHarness`, compiled by `script/build-frame-accounts.sh` and executed under patched
+`FrameTxLibHarness`, compiled natively by the patched forge and executed under patched
 revm. The cheatcode copies its non-normative fixture fields without deriving or validating
 them. Targeted negative tests cover an empty nonce-key list; out-of-range recent-root,
 frame, signature, global trace, account-local event/storage, event, and topic indexes;
