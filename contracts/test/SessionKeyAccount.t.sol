@@ -73,9 +73,12 @@ contract SessionKeyAccountTest is FrameTest {
             flags: 0,
             target: EXPIRY_VERIFIER,
             gasLimit: 100_000,
+            stateGasLimit: 0,
             value: 0,
             data: abi.encodePacked(deadline),
-            status: 1
+            status: 1,
+            executionGasUsed: 0,
+            stateGasUsed: 0
         });
     }
 
@@ -119,18 +122,24 @@ contract SessionKeyAccountTest is FrameTest {
             flags: uint8(scopes),
             target: account,
             gasLimit: 200_000,
+            stateGasLimit: 0,
             value: 0,
             data: abi.encodeWithSignature("validate()"),
-            status: 0
+            status: 0,
+            executionGasUsed: 0,
+            stateGasUsed: 0
         });
         frames[1] = IFrameVm.FrameTxFrame({
             mode: MODE_SENDER,
             flags: 0,
             target: target,
             gasLimit: 200_000,
+            stateGasLimit: 0,
             value: value,
             data: data,
-            status: 0
+            status: 0,
+            executionGasUsed: 0,
+            stateGasUsed: 0
         });
         IFrameVm.FrameTxSignature[] memory sigs = new IFrameVm.FrameTxSignature[](1);
         sigs[0] = secpSig(signer);
@@ -141,6 +150,7 @@ contract SessionKeyAccountTest is FrameTest {
             legacyNonce: 0,
             nonceKeys: nonceKeys,
             nonceKeysHash: LEGACY_NONCE_KEYS_HASH,
+            stateGasLeft: 0,
             sigHash: bytes32(uint256(0xf00d)),
             maxCost: 0,
             maxPriorityFeePerGas: 0,
@@ -256,9 +266,12 @@ contract SessionKeyAccountTest is FrameTest {
             flags: 0,
             target: OTHER_TOKEN,
             gasLimit: 200_000,
+            stateGasLimit: 0,
             value: 0,
             data: _transfer(),
-            status: 0
+            status: 0,
+            executionGasUsed: 0,
+            stateGasUsed: 0
         });
         ctx.frames = frames;
         assertRefusesFrame(account, ctx, "a later sender frame must be checked too");

@@ -12,7 +12,7 @@ EIP-8250/8272/7906-inspired fixture fields on the wire, public-mempool policy, o
 
 | Status | Component | Detail |
 |---|---|---|
-| Working-tree only | Baseline Anvil RPC | Decode, validate, mine, retrieve, trace, and replay raw scalar-nonce type-`0x06` transactions; atomic batches, default code, canonical raw-byte fork replay, and transaction-hash forks are covered by `foundry/crates/anvil/tests/it/frame_tx.rs`. |
+| Working-tree only | Baseline Anvil RPC | Decode, validate, mine, retrieve, trace, and replay raw type-`0x06` transactions (scalar nonce, `fees`/`limits` envelope); atomic batches, default code, canonical raw-byte fork replay, and transaction-hash forks are covered by `foundry/crates/anvil/tests/it/frame_tx.rs`. |
 | Working-tree only | Frame receipts | Consensus receipt encoding and trie roots include the payer and ordered `[status, gas_used, logs]` frame results; RPC receipts expose these as `payer` and `frameReceipts`. |
 | Working-tree only | Expiry activation | Enabled nodes install the canonical verifier at `0x8141` after source replay, and memory/fork resets restore it. |
 | Missing | Fixture-inspired wire/state integration | No keyed-nonce list/state, recent-root list/verification, trace construction, or `POST_TX` suffix execution. Those fields exist only in synthetic `setFrameTx` fixtures. |
@@ -29,7 +29,7 @@ The exact Anvil and REVM commits are recorded in
 
 ## Activation and execution profiles
 
-Frame transactions are off by default. `--enable-frame-transactions` enables the scalar
+Frame transactions are off by default. `--enable-frame-transactions` enables the
 profile only for Ethereum hard forks before Amsterdam. OP Stack, Tempo, Monad, and Amsterdam
 state-gas profiles reject type `0x06` at submission instead of allowing it to reach a
 partially compatible executor.

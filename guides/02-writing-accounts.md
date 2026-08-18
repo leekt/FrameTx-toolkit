@@ -55,24 +55,28 @@ to the transaction encoding in the normative spec body.
 ### Parameter tables
 
 Normative `TXPARAM`: `0x00` tx type · `0x01` scalar wire `nonce` · `0x02` sender ·
-`0x03`-`0x05` fee fields · `0x06` max cost · `0x07` blob count · `0x08` **canonical
+`0x03`-`0x05` `fees` fields · `0x06` max cost · `0x07` blob count · `0x08` **canonical
 signature hash** · `0x09` frame count · `0x0A` current frame index · `0x0B` signature
-count. Other selectors are undefined in the pinned EIP-8141 body.
+count · `0x0C` state gas left in the current frame. Other selectors below `0x80` are
+undefined.
 
-Non-normative fixture `TXPARAM` extensions: the supplied context treats `0x01` as a shared
-keyed-nonce sequence and adds `0x0C` sender legacy nonce · `0x0D` supplied nonce-key count ·
-`0x0E` supplied nonce-key hash · `0x0F` supplied recent-root-reference count · `0x10` first
-supplied nonce key. `0x10` halts for an empty list; `0x11` is undefined and halts. These
-values come from `setFrameTx`/host context; they are not extra fields in the current RLP
-payload and the fixture does not implement keyed-nonce state transitions.
+Non-normative fixture `TXPARAM` extensions live at `0x80`+: the supplied context treats
+`0x01` as a shared keyed-nonce sequence and adds `0x80` sender legacy nonce · `0x81`
+supplied nonce-key count · `0x82` supplied nonce-key hash · `0x83` supplied
+recent-root-reference count · `0x84` first supplied nonce key. `0x84` halts for an empty
+list; `0x85` is undefined and halts. These values come from `setFrameTx`/host context;
+they are not extra fields in the current RLP payload and the fixture does not implement
+keyed-nonce state transitions.
 
-`FRAMEPARAM`: `0x00` resolved_target · `0x01` gas_limit · `0x02` mode · `0x03` flags ·
-`0x04` len(data) · `0x05` status (halts for the current or a later frame) · `0x06`
-allowed_scope · `0x07` atomic_batch · `0x08` value. Modes `0`-`2` are the normative
-`DEFAULT`, `VERIFY`, and `SENDER` values; mode `3` (`POST_TX`) exists only in the fixture
-profile described below.
+`FRAMEPARAM`: `0x00` resolved_target · `0x01` limits.execution · `0x02` mode · `0x03`
+flags · `0x04` len(data) · `0x05` status (halts for the current or a later frame) · `0x06`
+allowed_scope · `0x07` atomic_batch · `0x08` value · `0x09` limits.state · `0x0A`
+gas_used.execution and `0x0B` gas_used.state (both halt for the current or a later frame).
+Modes `0`-`2` are the normative `DEFAULT`, `VERIFY`, and `SENDER` values; mode `3`
+(`POST_TX`) exists only in the fixture profile described below.
 
-`SIGPARAM`: `0x00` resolved_signer · `0x01` scheme · `0x02` msg · `0x03` len(signature).
+`SIGPARAM`: `0x00` resolved_signer · `0x01` scheme · `0x02` msg · `0x03` len(signature)
+(ARBITRARY entries only; protocol-validated schemes halt).
 
 `SIGDATACOPY` reads only `ARBITRARY` signature bytes. It zero-fills past the end like
 `CALLDATACOPY` and exceptional-halts for protocol-validated schemes. On **stock** solc,

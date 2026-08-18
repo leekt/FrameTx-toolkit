@@ -54,28 +54,37 @@ contract SponsoringPaymasterTest is FrameTest {
             flags: uint8(SCOPE_EXECUTION),
             target: SENDER_ACCOUNT,
             gasLimit: 100_000,
+            stateGasLimit: 0,
             value: 0,
             data: abi.encodeWithSignature("validate()"),
             // Already ran and approved execution, which is what makes the pay frame legal.
-            status: 1
+            status: 1,
+            executionGasUsed: 0,
+            stateGasUsed: 0
         });
         frames[1] = IFrameVm.FrameTxFrame({
             mode: MODE_VERIFY,
             flags: uint8(scopes),
             target: paymaster,
             gasLimit: 100_000,
+            stateGasLimit: 0,
             value: 0,
             data: abi.encodeWithSignature("sponsorTransaction(uint256)", sigIndex),
-            status: 0
+            status: 0,
+            executionGasUsed: 0,
+            stateGasUsed: 0
         });
         frames[2] = IFrameVm.FrameTxFrame({
             mode: MODE_SENDER,
             flags: 0,
             target: address(0x7043),
             gasLimit: 100_000,
+            stateGasLimit: 0,
             value: 0,
             data: abi.encodeWithSignature("transfer(address,uint256)", OTHER_KEY, uint256(1)),
-            status: 0
+            status: 0,
+            executionGasUsed: 0,
+            stateGasUsed: 0
         });
 
         IFrameVm.FrameTxSignature[] memory sigs = new IFrameVm.FrameTxSignature[](2);
@@ -89,6 +98,7 @@ contract SponsoringPaymasterTest is FrameTest {
             legacyNonce: 0,
             nonceKeys: nonceKeys,
             nonceKeysHash: LEGACY_NONCE_KEYS_HASH,
+            stateGasLeft: 0,
             sigHash: bytes32(uint256(0xf00d)),
             maxCost: maxCost,
             maxPriorityFeePerGas: 0,

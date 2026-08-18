@@ -97,6 +97,22 @@ contract FrameTxLibHarness {
         return FrameTxLib.frameGasLimit(i);
     }
 
+    function stateGasLeft() external view returns (uint256) {
+        return FrameTxLib.stateGasLeft();
+    }
+
+    function frameStateGasLimit(uint256 i) external view returns (uint256) {
+        return FrameTxLib.frameStateGasLimit(i);
+    }
+
+    function frameExecutionGasUsed(uint256 i) external view returns (uint256) {
+        return FrameTxLib.frameExecutionGasUsed(i);
+    }
+
+    function frameStateGasUsed(uint256 i) external view returns (uint256) {
+        return FrameTxLib.frameStateGasUsed(i);
+    }
+
     function frameMode(uint256 i) external view returns (uint256) {
         return FrameTxLib.frameMode(i);
     }
