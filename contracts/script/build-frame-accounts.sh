@@ -34,7 +34,8 @@ mkdir -p "$OUT"
 shopt -s nullglob
 found=0
 for sol in "$(dirname "${BASH_SOURCE[0]}")/../src/accounts"/*.sol \
-           "$(dirname "${BASH_SOURCE[0]}")/../src/frame"/*.sol; do
+           "$(dirname "${BASH_SOURCE[0]}")/../src/frame"/*.sol \
+           "$(dirname "${BASH_SOURCE[0]}")/../src/eips"/*.sol; do
     name="$(basename "$sol" .sol)"
     echo "compiling $name"
     # Excluding CBOR makes byte counts refer only to executable code; metadata
