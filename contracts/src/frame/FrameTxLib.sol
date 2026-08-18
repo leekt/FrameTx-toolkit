@@ -10,9 +10,10 @@ pragma solidity ^0.8.30;
 /// @dev    Requires the patched solc (`--experimental --evm-version @future`);
 ///         it also exposes the local, non-normative tooling-fixture allocation
 ///         RECENTROOTREFLOAD (0xb6), TXTRACE (0xb7), TXDIFF (0xb8), and
-///         EVENTDATACOPY (0xb9). Fixture TXPARAM selectors 0x0C-0x10, mode
-///         MODE_POST_TX, recent roots, and trace/diff/event values are supplied
-///         by the host; this library does not make them transaction-wire data.
+///         EVENTDATACOPY (0xb9). Fixture TXPARAM selectors live at 0x80-0x84,
+///         clear of the normative table; they, mode MODE_POST_TX, recent
+///         roots, and trace/diff/event values are supplied by the host; this
+///         library does not make them transaction-wire data.
 ///         Every function requires an active frame context. An absent context,
 ///         an out-of-bounds index, or another halt case flagged below causes an
 ///         exceptional halt, not a revert. TXTRACE, TXDIFF, and EVENTDATACOPY
@@ -144,44 +145,54 @@ library FrameTxLib {
         }
     }
 
-    /// @notice Host-supplied sender legacy nonce in transaction pre-state
-    ///         (fixture TXPARAM 0x0C), distinct from the fixture interpretation
-    ///         of `txNonce()` as a shared sequence. Non-normative.
-    function legacyNonce() internal view returns (uint256 v) {
+    /// @notice State gas remaining in the currently executing frame
+    ///         (TXPARAM 0x0C). The toolkit meters the state dimension for the
+    ///         charges EIP-8141 itself defines; opcode-level EIP-8037 charges
+    ///         are not modeled yet.
+    function stateGasLeft() internal view returns (uint256 v) {
         assembly ("memory-safe") {
             v := txparam(0x0C)
         }
     }
 
-    /// @notice Number of host-supplied nonce keys (fixture TXPARAM 0x0D).
-    ///         Non-normative; the opcode does not validate their ordering.
-    function nonceKeyCount() internal view returns (uint256 v) {
+    /// @notice Host-supplied sender legacy nonce in transaction pre-state
+    ///         (fixture TXPARAM 0x80), distinct from the fixture interpretation
+    ///         of `txNonce()` as a shared sequence. Non-normative.
+    function legacyNonce() internal view returns (uint256 v) {
         assembly ("memory-safe") {
-            v := txparam(0x0D)
+            v := txparam(0x80)
         }
     }
 
-    /// @notice Host-supplied nonce-key-list hash (fixture TXPARAM 0x0E).
+    /// @notice Number of host-supplied nonce keys (fixture TXPARAM 0x81).
+    ///         Non-normative; the opcode does not validate their ordering.
+    function nonceKeyCount() internal view returns (uint256 v) {
+        assembly ("memory-safe") {
+            v := txparam(0x81)
+        }
+    }
+
+    /// @notice Host-supplied nonce-key-list hash (fixture TXPARAM 0x82).
     ///         Non-normative; the opcode and cheatcode do not derive it.
     function nonceKeysHash() internal view returns (bytes32 v) {
         assembly ("memory-safe") {
-            v := txparam(0x0E)
+            v := txparam(0x82)
         }
     }
 
     /// @notice Number of host-supplied recent-root references
-    ///         (fixture TXPARAM 0x0F). Non-normative and not verified here.
+    ///         (fixture TXPARAM 0x83). Non-normative and not verified here.
     function recentRootReferenceCount() internal view returns (uint256 v) {
         assembly ("memory-safe") {
-            v := txparam(0x0F)
+            v := txparam(0x83)
         }
     }
 
-    /// @notice First host-supplied nonce key (fixture TXPARAM 0x10).
+    /// @notice First host-supplied nonce key (fixture TXPARAM 0x84).
     ///         Non-normative; exceptional-halts when the fixture list is empty.
     function firstNonceKey() internal view returns (uint256 v) {
         assembly ("memory-safe") {
-            v := txparam(0x10)
+            v := txparam(0x84)
         }
     }
 
@@ -224,7 +235,8 @@ library FrameTxLib {
         }
     }
 
-    /// @notice The frame's gas limit (FRAMEPARAM 0x01).
+    /// @notice The frame's execution gas limit, `limits.execution`
+    ///         (FRAMEPARAM 0x01).
     function frameGasLimit(uint256 frameIndex) internal view returns (uint256 v) {
         assembly ("memory-safe") {
             v := frameparam(frameIndex, 0x01)
@@ -281,6 +293,31 @@ library FrameTxLib {
     function frameValue(uint256 frameIndex) internal view returns (uint256 v) {
         assembly ("memory-safe") {
             v := frameparam(frameIndex, 0x08)
+        }
+    }
+
+    /// @notice The frame's state gas limit, `limits.state` (FRAMEPARAM 0x09).
+    function frameStateGasLimit(uint256 frameIndex) internal view returns (uint256 v) {
+        assembly ("memory-safe") {
+            v := frameparam(frameIndex, 0x09)
+        }
+    }
+
+    /// @notice A PAST frame's receipt `gas_used.execution` (FRAMEPARAM 0x0A).
+    ///         Asking about the current or a later frame is an exceptional
+    ///         halt, so guard with `currentFrameIndex()`.
+    function frameExecutionGasUsed(uint256 frameIndex) internal view returns (uint256 v) {
+        assembly ("memory-safe") {
+            v := frameparam(frameIndex, 0x0A)
+        }
+    }
+
+    /// @notice A PAST frame's receipt `gas_used.state` (FRAMEPARAM 0x0B). A
+    ///         later frame's refill may still reduce it. Halts for the current
+    ///         or a later frame.
+    function frameStateGasUsed(uint256 frameIndex) internal view returns (uint256 v) {
+        assembly ("memory-safe") {
+            v := frameparam(frameIndex, 0x0B)
         }
     }
 
@@ -359,7 +396,9 @@ library FrameTxLib {
         return sigMsg(signatureIndex) == bytes32(0);
     }
 
-    /// @notice `len(signature)` of the entry's raw bytes (SIGPARAM 0x03).
+    /// @notice `len(signature)` of an ARBITRARY entry's raw bytes
+    ///         (SIGPARAM 0x03). Halts for protocol-validated schemes, whose
+    ///         raw bytes -- length included -- are not introspectable.
     function sigLength(uint256 signatureIndex) internal view returns (uint256 v) {
         assembly ("memory-safe") {
             v := sigparam(signatureIndex, 0x03)

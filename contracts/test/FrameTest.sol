@@ -17,11 +17,18 @@ interface IFrameVm {
         uint8 flags;
         /// Host-supplied resolved target; a real null target resolves to sender.
         address target;
+        /// Execution gas limit (`limits.execution`).
         uint64 gasLimit;
+        /// State gas limit (`limits.state`, EIP-8037).
+        uint64 stateGasLimit;
         uint256 value;
         bytes data;
         /// 0 failed, 1 success, 2 skipped. Only read for frames before the current one.
         uint8 status;
+        /// Receipt `gas_used.execution`. Only read for frames before the current one.
+        uint64 executionGasUsed;
+        /// Receipt `gas_used.state`. Only read for frames before the current one.
+        uint64 stateGasUsed;
     }
 
     struct FrameTxSignature {
@@ -86,12 +93,14 @@ interface IFrameVm {
         address sender;
         /// TXPARAM 0x01: baseline scalar wire nonce, or a fixture-supplied shared sequence.
         uint64 nonce;
-        /// Host-supplied non-normative fixture selector TXPARAM 0x0C.
+        /// Host-supplied non-normative fixture selector TXPARAM 0x80.
         uint64 legacyNonce;
-        /// Host-supplied non-normative fixture selector data for 0x0D/0x10.
+        /// Host-supplied non-normative fixture selector data for 0x81/0x84.
         uint256[] nonceKeys;
-        /// Host-supplied non-normative fixture value for TXPARAM 0x0E; not derived here.
+        /// Host-supplied non-normative fixture value for TXPARAM 0x82; not derived here.
         bytes32 nonceKeysHash;
+        /// State gas remaining in the current frame, TXPARAM 0x0C.
+        uint64 stateGasLeft;
         /// Canonical EIP-8141 signature hash; supplied rather than derived by the cheatcode.
         bytes32 sigHash;
         uint256 maxCost;
@@ -102,7 +111,7 @@ interface IFrameVm {
         uint64 frameIndex;
         FrameTxFrame[] frames;
         FrameTxSignature[] signatures;
-        /// Host-supplied non-normative fixture data for TXPARAM 0x0F/B6.
+        /// Host-supplied non-normative fixture data for TXPARAM 0x83/B6.
         FrameTxRecentRootReference[] recentRootReferences;
         /// Host-supplied non-normative fixture data for B7-B9.
         FrameTxTrace trace;
@@ -199,9 +208,12 @@ abstract contract FrameTest is Test {
             flags: uint8(approvableScopes),
             target: account,
             gasLimit: 100_000,
+            stateGasLimit: 0,
             value: 0,
             data: "",
-            status: 0
+            status: 0,
+            executionGasUsed: 0,
+            stateGasUsed: 0
         });
         return IFrameVm.FrameTx({
             sender: account,
@@ -209,6 +221,7 @@ abstract contract FrameTest is Test {
             legacyNonce: 0,
             nonceKeys: nonceKeys,
             nonceKeysHash: LEGACY_NONCE_KEYS_HASH,
+            stateGasLeft: 0,
             sigHash: sigHash,
             maxCost: 0,
             maxPriorityFeePerGas: 0,

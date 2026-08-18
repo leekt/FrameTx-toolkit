@@ -45,7 +45,8 @@ cd ../foundry
 cargo build --locked --bin forge --bin anvil
 ```
 
-Foundry's twelve manifest patches and lockfile resolve to the exact published REVM commit.
+Foundry's twelve manifest patches and lockfile resolve to the exact published REVM commit,
+which is the same commit the root repository's `revm` gitlink pins.
 
 > [!warning] Patch every revm crate together
 > `foundry/Cargo.toml` patches **all twelve** revm crates to the same immutable fork revision.
@@ -86,11 +87,12 @@ separate compiler component.
 
 ```solidity
 struct FrameTxFrame  { uint8 mode; uint8 flags; address target; uint64 gasLimit;
-                       uint256 value; bytes data; uint8 status; }
+                       uint64 stateGasLimit; uint256 value; bytes data; uint8 status;
+                       uint64 executionGasUsed; uint64 stateGasUsed; }
 struct FrameTxSignature { uint8 scheme; address signer; bytes32 msgHash; bytes signature; }
 struct FrameTxRecentRootReference { bytes32 sourceId; uint64 slot; bytes32 root; }
 struct FrameTx { address sender; uint64 nonce; uint64 legacyNonce;
-                 uint256[] nonceKeys; bytes32 nonceKeysHash;
+                 uint256[] nonceKeys; bytes32 nonceKeysHash; uint64 stateGasLeft;
                  bytes32 sigHash; uint256 maxCost; uint256 maxPriorityFeePerGas;
                  uint256 maxFeePerGas; uint256 maxFeePerBlobGas; uint64 blobCount;
                  uint64 frameIndex; FrameTxFrame[] frames; FrameTxSignature[] signatures;
@@ -128,7 +130,7 @@ install the canonical expiry verifier runtime at `0x8141` after any inherited so
 transaction replay; in-memory and fork resets restore the verifier.
 
 Mined RPC receipts expose the paying account as `payer` and ordered nested results as
-`frameReceipts`, each containing `status`, `gasUsed`, and `logs`. The same payload is encoded
+`frameReceipts`, each containing `status`, `executionGasUsed`, `stateGasUsed`, and `logs`. The same payload is encoded
 as the typed consensus receipt and included in the block receipt trie. Parity
 `trace_rawTransaction` and `trace_replayTransaction` execute Frame calls and return state
 diffs; raw tracing does not commit them. Fork replay fetches and verifies canonical raw bytes,
@@ -234,7 +236,7 @@ Still open:
 | EIP-8250 keyed nonces | No wire fields, nonce-manager state, first-use charge, or keyed pool identity |
 | EIP-8272 recent roots | No wire fields, pre-execution verification, or system contract; `RECENT_ROOT_CODE` remains TBD upstream |
 | EIP-7906 POST_TX | No suffix validation, trace construction, or execution-body rollback; gas remains provisional |
-| Amsterdam state gas | Scalar Frame gas is rejected when EIP-2780/EIP-8037 state-gas rules are active |
+| Amsterdam state gas | Frame transactions are rejected when node-level EIP-2780/EIP-8037 state-gas rules are active; the per-frame `limits.state` pools here meter only EIP-8141's own charge points |
 | EIP-7851 opcode assignment | Upstream remains TBD; the working tree consistently uses non-normative `0xf7` |
 | EIP-8151 activation/vectors | No named-fork activation or official EEST vectors exist; the toolkit uses explicit Prague-or-later opt-in |
 | Networking | No public gossip policy or blob-sidecar wrapper for type `0x06` |

@@ -26,6 +26,10 @@ interface IHarness {
     function recentRoot(uint256 i) external view returns (bytes32);
     function frameTarget(uint256 i) external view returns (address);
     function frameGasLimit(uint256 i) external view returns (uint256);
+    function stateGasLeft() external view returns (uint256);
+    function frameStateGasLimit(uint256 i) external view returns (uint256);
+    function frameExecutionGasUsed(uint256 i) external view returns (uint256);
+    function frameStateGasUsed(uint256 i) external view returns (uint256);
     function frameMode(uint256 i) external view returns (uint256);
     function frameFlags(uint256 i) external view returns (uint256);
     function frameDataLength(uint256 i) external view returns (uint256);
@@ -199,9 +203,12 @@ contract FrameTxLibTest is FrameTest {
             flags: 0x3,
             target: address(0xACC0),
             gasLimit: 100_000,
+            stateGasLimit: 20_000,
             value: 0,
             data: FRAME0_DATA,
-            status: 1
+            status: 1,
+            executionGasUsed: 90_000,
+            stateGasUsed: 15_000
         });
         frames[1] = IFrameVm.FrameTxFrame({
             mode: MODE_POST_TX,
@@ -209,9 +216,12 @@ contract FrameTxLibTest is FrameTest {
             flags: 0x4,
             target: HARNESS,
             gasLimit: 500_000,
+            stateGasLimit: 30_000,
             value: 42 ether,
             data: FRAME1_DATA,
-            status: 0
+            status: 0,
+            executionGasUsed: 0,
+            stateGasUsed: 0
         });
 
         IFrameVm.FrameTxSignature[] memory sigs = new IFrameVm.FrameTxSignature[](2);
@@ -240,6 +250,7 @@ contract FrameTxLibTest is FrameTest {
         ctx.legacyNonce = 11;
         ctx.nonceKeys = nonceKeys;
         ctx.nonceKeysHash = NONCE_KEYS_HASH;
+        ctx.stateGasLeft = 25_000;
         ctx.sigHash = SIG_HASH;
         ctx.maxCost = 1 ether;
         ctx.maxPriorityFeePerGas = 2 gwei;
@@ -278,6 +289,7 @@ contract FrameTxLibTest is FrameTest {
         assertEq(h.frameCount(), 2, "frameCount");
         assertEq(h.currentFrameIndex(), 1, "currentFrameIndex");
         assertEq(h.signatureCount(), 2, "signatureCount");
+        assertEq(h.stateGasLeft(), 25_000, "stateGasLeft");
         assertEq(h.legacyNonce(), 11, "legacyNonce");
         assertEq(h.nonceKeyCount(), 2, "nonceKeyCount");
         assertEq(h.nonceKeysHash(), NONCE_KEYS_HASH, "nonceKeysHash");
@@ -301,7 +313,11 @@ contract FrameTxLibTest is FrameTest {
 
         assertEq(h.frameTarget(1), HARNESS, "frame 1 target");
         assertEq(h.frameMode(1), MODE_POST_TX, "frame 1 mode POST_TX");
-        assertEq(h.frameGasLimit(1), 500_000, "frame 1 gas limit");
+        assertEq(h.frameGasLimit(1), 500_000, "frame 1 execution gas limit");
+        assertEq(h.frameStateGasLimit(0), 20_000, "frame 0 state gas limit");
+        assertEq(h.frameStateGasLimit(1), 30_000, "frame 1 state gas limit");
+        assertEq(h.frameExecutionGasUsed(0), 90_000, "frame 0 receipt execution gas");
+        assertEq(h.frameStateGasUsed(0), 15_000, "frame 0 receipt state gas");
         assertEq(h.frameValue(1), 42 ether, "frame 1 value");
         assertEq(h.frameAllowedScope(1), 0, "frame 1 allowed scope");
         assertTrue(h.frameIsAtomicBatch(1), "frame 1 atomic");
@@ -509,6 +525,26 @@ contract FrameTxLibTest is FrameTest {
     function test_sigSignerOfArbitraryHalts() public inFrame {
         _assertHarnessCallFails(
             abi.encodeCall(IHarness.sigSigner, (1)), "resolved signer of ARBITRARY must fail"
+        );
+    }
+
+    /// The signature length of a protocol-verified entry is not readable:
+    /// raw bytes stay opaque, length included (EIPs PR 12187).
+    function test_sigLengthOfProtocolSchemeHalts() public inFrame {
+        _assertHarnessCallFails(
+            abi.encodeCall(IHarness.sigLength, (0)), "length of SECP256K1 bytes must fail"
+        );
+    }
+
+    /// Receipt gas of the current frame does not exist yet, like its status.
+    function test_currentFrameReceiptGasHalts() public inFrame {
+        _assertHarnessCallFails(
+            abi.encodeCall(IHarness.frameExecutionGasUsed, (1)),
+            "gas_used.execution of the current frame must fail"
+        );
+        _assertHarnessCallFails(
+            abi.encodeCall(IHarness.frameStateGasUsed, (1)),
+            "gas_used.state of the current frame must fail"
         );
     }
 

@@ -29,11 +29,11 @@ surface or helpers built from it:
 
 | Scope | Functions |
 |---|---|
-| Normative transaction (`TXPARAM 0x00`-`0x0B`) | `txType` `txNonce` `txSender` `maxPriorityFeePerGas` `maxFeePerGas` `maxFeePerBlobGas` `maxCost` `blobCount` `sigHash` `frameCount` `currentFrameIndex` `signatureCount` |
-| Frame (`FRAMEPARAM`, `FRAMEDATALOAD`, `FRAMEDATACOPY`) | `frameTarget` `frameGasLimit` `frameMode` `frameFlags` `frameDataLength` `frameStatus` `frameAllowedScope` `frameIsAtomicBatch` `frameValue` `frameDataLoad` `frameDataSlice` `frameData` |
+| Normative transaction (`TXPARAM 0x00`-`0x0C`) | `txType` `txNonce` `txSender` `maxPriorityFeePerGas` `maxFeePerGas` `maxFeePerBlobGas` `maxCost` `blobCount` `sigHash` `frameCount` `currentFrameIndex` `signatureCount` `stateGasLeft` |
+| Frame (`FRAMEPARAM`, `FRAMEDATALOAD`, `FRAMEDATACOPY`) | `frameTarget` `frameGasLimit` `frameStateGasLimit` `frameMode` `frameFlags` `frameDataLength` `frameStatus` `frameExecutionGasUsed` `frameStateGasUsed` `frameAllowedScope` `frameIsAtomicBatch` `frameValue` `frameDataLoad` `frameDataSlice` `frameData` |
 | Expiry | `isExpiryFrame` `expiryDeadline` — recognise the expiry verifier frame and read its 8-byte deadline (see [05](05-session-key-account.md), "Expiry, without reading the clock") |
 | Signature (`SIGPARAM`, `SIGDATACOPY`) | `sigSigner` `sigScheme` `sigMsg` `signedThisTx` `sigLength` `sigDataSlice` `sigData` |
-| Fixture transaction (`TXPARAM 0x0C`-`0x10`) | `legacyNonce` `nonceKeyCount` `nonceKeysHash` `recentRootReferenceCount` `firstNonceKey` |
+| Fixture transaction (`TXPARAM 0x80`-`0x84`) | `legacyNonce` `nonceKeyCount` `nonceKeysHash` `recentRootReferenceCount` `firstNonceKey` |
 | Fixture recent roots (`RECENTROOTREFLOAD`) | `recentRootSourceId` `recentRootSlot` `recentRoot` |
 | Fixture POST_TX trace (`TXTRACE`) | `traceBalanceDiffCount` `traceStorageDiffCount` `traceDeploymentCount` `traceBalanceAccount` `traceBalanceBefore` `traceBalanceAfter` `traceStorageAccount` `traceStorageKey` `traceStorageBefore` `traceStorageAfter` `traceDeployedAccount` `traceDeployedCodeHash` `traceEventCount` `traceEventEmitter` `traceEventTopicCount` `traceEventTopic0` `traceEventTopic1` `traceEventTopic2` `traceEventTopic3` `traceEventDataLength` `traceGasPreCharge` `traceGasPayer` |
 | Fixture direct POST_TX diff (`TXDIFF`) | `storageValueBefore` `storageValueAfter` `accountBalanceBefore` `accountBalanceAfter` `accountCodeHashBefore` `accountCodeHashAfter` `accountStorageDiffCount` `accountStorageDiffIndex` `accountEventCount` `accountEventIndex` `accountDiffFlags` |
@@ -44,7 +44,7 @@ Constants cover normative `SCHEME_*`, modes 0-2, `STATUS_*`, and `SCOPE_*`, plus
 non-normative fixture `MODE_POST_TX` and the `EXPIRY_VERIFIER` predeploy address.
 
 Normative `TXPARAM(0x01)` is the scalar EIP-8141 wire nonce. A `setFrameTx` fixture may
-instead supply it as a shared keyed-nonce sequence. Selectors `0x0C`-`0x10`, the nonce-key
+instead supply it as a shared keyed-nonce sequence. Selectors `0x80`-`0x84`, the nonce-key
 list/hash, recent roots, `MODE_POST_TX`, and all trace/diff/event values are copied from the
 host fixture; neither the library nor the cheatcode derives, orders, or verifies them.
 `sigHash`, by contrast, remains the canonical EIP-8141 signature hash, although a synthetic

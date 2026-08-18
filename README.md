@@ -11,7 +11,7 @@ recorded at exact commits in [VERSIONS.md](VERSIONS.md).
 
 | EIP | Change | Target fork | Inclusion status | Toolkit support |
 |---|---|---|---|---|
-| [EIP-7997](https://forkcast.org/eips/7997) | Deterministic factory contract | [Glamsterdam](https://forkcast.org/upgrade/glamsterdam) | Scheduled (SFI) | Exact factory address/runtime already available in Anvil; fork-gated activation and nonce `1` are not modeled |
+| [EIP-7997](https://forkcast.org/eips/7997) | Deterministic factory contract | [Glamsterdam](https://forkcast.org/upgrade/glamsterdam) | Scheduled (SFI) | Exact factory address/runtime already available in Anvil, plus the `Create2FactoryLib` Solidity helper; fork-gated activation and nonce `1` are not modeled |
 | [EIP-8141](https://forkcast.org/eips/8141) | Frame transactions | [Hegotá](https://forkcast.org/upgrade/hegota) | Considered (CFI) | Compiler, VM, and opt-in Anvil raw-RPC path implemented, including receipts, traces, and fork replay |
 | [EIP-7906](https://forkcast.org/eips/7906) | Transaction assertions via state-diff opcode | [Hegotá](https://forkcast.org/upgrade/hegota) | Proposed (PFI) | Host-supplied EVM fixture only; wire and trace construction pending |
 | [EIP-8250](https://forkcast.org/eips/8250) | Keyed nonces for frame transactions | [Hegotá](https://forkcast.org/upgrade/hegota) | Proposed (PFI) | Host-supplied context only; wire and state integration pending |
@@ -22,7 +22,9 @@ recorded at exact commits in [VERSIONS.md](VERSIONS.md).
 
 Fork inclusion statuses are sourced from Forkcast as of 2026-08-16. The local
 [implementation document](spec/EIP8141.md) has a normative body based on pinned EIP-8141
-with native `SIGDATACOPY`, followed by a clearly non-normative appendix for the context-only
+master (with the `fees`/`limits` envelope and EIP-8037 state-gas budgets) plus the native
+`SIGDATACOPY` split of [EIPs PR #12187](https://github.com/ethereum/EIPs/pull/12187),
+followed by a clearly non-normative appendix for the context-only
 EIP-8250/8272/7906 tooling fixture. The appendix does not define transaction-wire semantics
 for those extensions.
 
@@ -64,8 +66,8 @@ check.
 | [`solidity/`](https://github.com/leekt/solidity/tree/feat/eip8141-frame-opcodes) | Submodule — compiles the pinned/native surface plus non-normative fixture opcodes |
 | [`revm/`](https://github.com/leekt/revm/tree/feat/native-sigdatacopy) | Submodule — executes the pinned/native surface plus host-supplied fixture context |
 | [`foundry/`](https://github.com/leekt/foundry/tree/feat/frame-tx-txparam-context) | Submodule — `forge` with the frame cheatcodes |
-| [`spec/EIP8141.md`](spec/EIP8141.md) | Pinned/native normative overlay plus a non-normative tooling-fixture appendix |
-| [`contracts/`](contracts/) | The Foundry project: accounts in `src/accounts`, policy in `src/policy`, **all tests** in `test/` |
+| [`spec/EIP8141.md`](spec/EIP8141.md) | Master-spec normative overlay (with PR #12187's SIGDATACOPY split) plus a non-normative tooling-fixture appendix |
+| [`contracts/`](contracts/) | The Foundry project: accounts in `src/accounts`, policy in `src/policy`, EIP helper libraries in `src/eips`, **all tests** in `test/` |
 | [`guides/`](guides/) | Build, write, and what does not work yet |
 | [`tools/check-spec-drift.sh`](tools/check-spec-drift.sh) | Detect whether the spec moved |
 

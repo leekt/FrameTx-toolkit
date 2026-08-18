@@ -4,7 +4,7 @@
 # Exit 0: no drift. Exit 1: the spec moved -- see VERSIONS.md for what to re-check.
 set -euo pipefail
 
-PINNED_COMMIT="064f49621d05ce25323def867a6a2ed9275d3570"
+PINNED_COMMIT="13d1b37672b8fb321c7e880b521cfe375683c9e4"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OVERLAY="$REPO_ROOT/spec/EIP8141.md"
 PINNED_URL="https://raw.githubusercontent.com/ethereum/EIPs/$PINNED_COMMIT/EIPS/eip-8141.md"
