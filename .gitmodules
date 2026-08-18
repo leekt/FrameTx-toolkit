@@ -10,3 +10,7 @@
 	path = foundry
 	url = https://github.com/leekt/foundry.git
 	branch = feat/eip8141-frame-opcodes
+[submodule "foundry-core"]
+	path = foundry-core
+	url = https://github.com/leekt/foundry-core.git
+	branch = feat/evm-version-future

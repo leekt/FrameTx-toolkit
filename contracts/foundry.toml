@@ -1,24 +1,41 @@
-# The policy layer compiles and tests with stock solc: it contains no EIP-8141
-# opcodes, so Foundry's EVM can execute it. The frame glue that does use the new
-# opcodes lives in src/accounts and src/frame and is built by
-# script/build-frame-accounts.sh because Foundry cannot compile it (evm_version
-# "@future" is not in its enum). The toolkit's patched revm executes the
-# resulting artifacts during forge tests.
+# The default profile compiles everything -- policy, frame glue, accounts and
+# EIP helpers -- natively with the patched solc at the experimental `@future`
+# EVM version. It requires the toolkit's patched forge (stock Foundry has no
+# `@future` in its EvmVersion enum) and the patched solc built at
+# ../solidity/build/solc/solc.
 [profile.default]
-# Only the policy layer is compiled by forge. The accounts in src/accounts use
-# the frame opcodes, which forge cannot compile; build-frame-accounts.sh handles
-# them with the patched solc and tests load the artifacts with vm.etch.
-src = "src/policy"
+src = "src"
 test = "test"
 out = "out"
 libs = ["lib"]
-solc = "0.8.30"
+solc = "../solidity/build/solc/solc"
+evm_version = "@future"
+# `@future` is experimental; solc requires the experimental setting with it.
+experimental = true
 optimizer = true
 optimizer_runs = 200
+# Metadata-free bytecode, as the docs' byte-count claims assume: no CBOR
+# trailer, no source-hash identity in the runtime.
+cbor_metadata = false
+bytecode_hash = "none"
+# The standalone Yul accounts are compiled manually (solc --strict-assembly);
+# their tests pin the resulting runtime bytes.
+skip = ["*.yul"]
 
-# Frame-glue accounts are compiled outside Foundry by
-# script/build-frame-accounts.sh; tests read their runtime bytecode from here.
-fs_permissions = [{ access = "read", path = "./out-frame" }]
+# Solar (forge's native Solidity frontend) has no knowledge of the fork's
+# frame builtins and reports them as unresolved symbols; the patched solc is
+# the only frontend that understands this dialect.
+[lint]
+lint_on_build = false
+
+# Stock-Foundry escape hatch: `FOUNDRY_PROFILE=policy forge test --match-path
+# "test/FrameAccountPolicy.t.sol"` runs the policy layer with stock solc and
+# stock forge; the frame glue is out of scope here.
+[profile.policy]
+src = "src/policy"
+solc = "0.8.30"
+evm_version = "prague"
+experimental = false
 
 [fmt]
 line_length = 100

@@ -147,12 +147,12 @@ The constructor-backed Foundry tests exercise this layout directly. Selectors:
 
 ```bash
 cd contracts
-SOLC=../solidity/build/solc/solc ./script/build-frame-accounts.sh
+../foundry/target/debug/forge build
 ```
 
-The current generated runtime is **463 bytes** (926 hex characters) at
-`out-frame/MultisigAccount/MultisigAccount.bin-runtime`. It was generated with
-`--no-cbor-metadata`; all 463 bytes are runtime code and there is no metadata trailer.
+The current generated runtime is **463 bytes** (926 hex characters) in
+`out/MultisigAccount.sol/MultisigAccount.json` (`deployedBytecode`). It is built with
+`cbor_metadata = false`; all 463 bytes are runtime code and there is no metadata trailer.
 
 Operand order is visible in the output if you want to confirm it: `600b b0` is
 `TXPARAM(0x0B)`; `6001 80 82 b4` is `SIGPARAM` with the index on top and `param = 0x01`

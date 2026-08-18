@@ -50,8 +50,8 @@ authority. The read helpers parse the raw designator that `EXTCODECOPY` exposes.
 
 ## Tests
 
-`test/Create2FactoryLib.t.sol` runs under stock Foundry. The other two harnesses are
-built by `script/build-frame-accounts.sh` and etched like the frame accounts; their
+`test/Create2FactoryLib.t.sol` uses no frame opcodes. The other two harnesses are
+compiled natively under the `@future` profile and etched like the frame accounts; their
 opcode wrappers are asserted to halt while the enabling bit is off (this test EVM never
 sets it), and their pure/view helpers are exercised for real, including a golden vector
 for the EIP-7819 address derivation.

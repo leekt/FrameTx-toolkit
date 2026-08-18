@@ -204,13 +204,13 @@ for session keys unless granting policy-administration power is intentional.
 
 ```bash
 cd contracts
-SOLC=../solidity/build/solc/solc ./script/build-frame-accounts.sh
+../foundry/target/debug/forge build
 ```
 
-Exit code 0; the only output on stderr is the standard "pre-release compiler
+Exit code 0; the only compiler noise is the standard "pre-release compiler
 version" warning. The current runtime bytecode lives in
-`out-frame/SessionKeyAccount/SessionKeyAccount.bin-runtime` (1448 bytes,
-`--no-cbor-metadata`). `FrameTxLib` leaves no trace in it — everything inlines —
+`out/SessionKeyAccount.sol/SessionKeyAccount.json` (`deployedBytecode`) (1448 bytes,
+`cbor_metadata = false`). `FrameTxLib` leaves no trace in it — everything inlines —
 and you can spot the introspection opcodes: `b0` (`TXPARAM`), `b1`
 (`FRAMEDATALOAD`), `b3` (`FRAMEPARAM`), `b4` (`SIGPARAM`), and `aa` (`APPROVE`)
 in `805f5faa` — `DUP1 PUSH0 PUSH0 APPROVE`, i.e. the scope duplicated from the

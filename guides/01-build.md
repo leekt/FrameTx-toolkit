@@ -8,7 +8,7 @@ them. Artifact generation must happen before `forge test`.
 
 The root gitlinks, Foundry's twelve REVM manifest patches, and `Cargo.lock` record the exact
 published commits in [VERSIONS.md](../VERSIONS.md). Follow the build order below from a fresh
-clone; generated `contracts/out-frame` artifacts are intentionally not checked in.
+clone.
 
 Clone and initialize the recorded stack:
 
@@ -69,28 +69,12 @@ rm -f /tmp/frame-probe.sol
 
 Successful compilation identifies the current tooling compiler. A missing `approvetx`
 identifies stock solc; a missing `txtrace`, `setdelegate`, or `setselfdelegate` can identify an
-older submodule state. The build script below performs the two Frame-fixture checks
-automatically.
+older submodule state.
 
-## 2. Generate account artifacts
+## 2. Build Foundry against the patched revm and compilers
 
-Foundry cannot compile the frame contracts because its EVM-version enum rejects `@future`
-and it has no passthrough for solc's `--experimental` flag. Generate the artifacts directly
-with patched solc:
-
-```bash
-cd contracts
-SOLC=../solidity/build/solc/solc ./script/build-frame-accounts.sh
-```
-
-This writes metadata-free ABI, creation-bytecode, and runtime-bytecode files under
-`contracts/out-frame/<Name>/`. The directory is ignored build output and is absent in a
-fresh checkout. Tests read it at runtime, so skipping this step produces missing or stale
-artifact failures rather than compiling the contracts on demand.
-
-## 3. Build Foundry against patched revm
-
-Foundry's manifest and lockfile pin all twelve REVM crates to the published toolkit revision:
+Foundry's manifest and lockfile pin all twelve REVM crates and the foundry-core compilers
+fork (which adds the `@future` EVM version) to the published toolkit revisions:
 
 ```bash
 cd ../foundry
@@ -101,9 +85,11 @@ cargo build --locked --bin forge --bin anvil --release
 
 The binaries land under `foundry/target/{debug,release}/` as `forge` and `anvil`.
 
-## 4. Run the contract tests
+## 3. Run the contract tests
 
-After building Forge, return to `contracts/` (whose artifacts were generated in step 2):
+The patched forge compiles everything — policy, frame glue, accounts, EIP helpers —
+natively: `contracts/foundry.toml` sets `evm_version = "@future"`, `experimental = true`,
+and `solc = "../solidity/build/solc/solc"` in its default profile.
 
 ```bash
 cd ../contracts
@@ -112,8 +98,10 @@ cd ../contracts
 ../foundry/target/release/forge test
 ```
 
-Stock Forge cannot execute these tests: its revm treats `0xaa` and `0xb0`-`0xb9` as invalid
-opcodes and does not implement the frame-context cheatcodes.
+Stock Forge cannot build or execute these tests: its compilers reject `@future`, its revm
+treats `0xaa` and `0xb0`-`0xb9` as invalid opcodes, and it lacks the frame-context
+cheatcodes. The `policy` profile (`FOUNDRY_PROFILE=policy`) remains stock-compatible for
+the policy layer alone.
 
 ## Why `--experimental --evm-version @future`
 

@@ -56,13 +56,13 @@ No frame ever calls an `execute()` function on the account: in `SENDER` mode the
 
 ```bash
 cd contracts
-SOLC=../solidity/build/solc/solc ./script/build-frame-accounts.sh
+../foundry/target/debug/forge build
 ```
 
 Compiles with zero errors (one unavoidable warning that this is a pre-release compiler).
 
-Runtime bytecode — **435 bytes** (`--no-cbor-metadata`, so no trailing metadata; the
-current bytes live in `out-frame/OwnerAccount/OwnerAccount.bin-runtime`).
+Runtime bytecode — **435 bytes** (`cbor_metadata = false`, so no trailing metadata; the
+current bytes live in `out/OwnerAccount.sol/OwnerAccount.json` (`deployedBytecode`)).
 
 `validate()`'s body is 60 bytes of it (`5f8054…aa`), dispatch excluded — note there is no
 trace of `FrameTxLib` left, just the opcodes:

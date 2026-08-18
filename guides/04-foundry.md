@@ -19,6 +19,7 @@ This table describes the published submodule commits recorded in
 | revm executes the seven opcodes | **Done** — covered by interpreter and account tests |
 | revm/compiler execute provisional B6-B9 | **Done** — synthetic `setFrameTx` contexts only |
 | `forge` built against the patched revm | **Done** — every revm crate resolves to the fork |
+| `forge build` compiling `@future` sources natively | **Done** — the foundry-core compilers fork adds `EvmVersion::Future`; `evm_version = "@future"` plus `experimental = true` drive the patched solc over standard JSON |
 | `setFrameTx` / `clearFrameTx` cheatcodes | **Done** |
 | `forge test` executing frame accounts | **Done** — full `contracts/` suite passes under the working-tree debug Forge |
 | anvil accepting baseline type `0x06` transactions | **Done** — explicit opt-in; decode, validate, execute; 27 integration tests |
@@ -34,8 +35,9 @@ This table describes the published submodule commits recorded in
 
 ## Building
 
-Build solc and generate `contracts/out-frame` before running Forge tests. The complete order
-is documented in [guides/01-build.md](01-build.md).
+Build solc before running Forge tests — `contracts/foundry.toml` points at it and forge
+compiles the frame contracts natively under `evm_version = "@future"` with
+`experimental = true`. The complete order is documented in [guides/01-build.md](01-build.md).
 
 ```bash
 cd revm
