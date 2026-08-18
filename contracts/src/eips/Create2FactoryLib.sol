@@ -24,9 +24,7 @@ library Create2FactoryLib {
     ///         to `initCodeHash`: standard CREATE2 derivation with the
     ///         factory as the creating account.
     function computeAddress(bytes32 salt, bytes32 initCodeHash) internal pure returns (address) {
-        return address(
-            uint160(uint256(keccak256(abi.encodePacked(hex"ff", FACTORY, salt, initCodeHash))))
-        );
+        return address(uint160(uint256(keccak256(abi.encodePacked(hex"ff", FACTORY, salt, initCodeHash)))));
     }
 
     /// @notice Deploys `initCode` through the factory.
@@ -37,10 +35,7 @@ library Create2FactoryLib {
     /// @notice Deploys `initCode` through the factory, forwarding `value` wei
     ///         to the constructor. Reverts with `DeploymentFailed` when the
     ///         factory call fails; the factory itself surfaces no reason.
-    function deploy(bytes32 salt, bytes memory initCode, uint256 value)
-        internal
-        returns (address deployed)
-    {
+    function deploy(bytes32 salt, bytes memory initCode, uint256 value) internal returns (address deployed) {
         (bool ok, bytes memory ret) = FACTORY.call{value: value}(abi.encodePacked(salt, initCode));
         if (!ok || ret.length != 20) revert DeploymentFailed();
         deployed = address(bytes20(ret));

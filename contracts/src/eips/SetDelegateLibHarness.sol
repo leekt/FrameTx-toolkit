@@ -17,11 +17,7 @@ contract SetDelegateLibHarness {
         return SetDelegateLib.clearDelegate(salt);
     }
 
-    function computeDelegateAddress(address deployer, bytes32 salt)
-        external
-        pure
-        returns (address)
-    {
+    function computeDelegateAddress(address deployer, bytes32 salt) external pure returns (address) {
         return SetDelegateLib.computeDelegateAddress(deployer, salt);
     }
 }

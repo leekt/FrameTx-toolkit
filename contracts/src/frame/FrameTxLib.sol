@@ -648,11 +648,7 @@ library FrameTxLib {
 
     /// @notice Global TXTRACE storage index at an account-local index
     ///         (TXDIFF 0x07). Halts when the local index is out of bounds.
-    function accountStorageDiffIndex(address account, uint256 localIndex)
-        internal
-        view
-        returns (uint256 v)
-    {
+    function accountStorageDiffIndex(address account, uint256 localIndex) internal view returns (uint256 v) {
         assembly ("memory-safe") {
             v := txdiff(0x07, account, localIndex)
         }
@@ -667,11 +663,7 @@ library FrameTxLib {
 
     /// @notice Global TXTRACE event index at an account-local index
     ///         (TXDIFF 0x09). Halts when the local index is out of bounds.
-    function accountEventIndex(address account, uint256 localIndex)
-        internal
-        view
-        returns (uint256 v)
-    {
+    function accountEventIndex(address account, uint256 localIndex) internal view returns (uint256 v) {
         assembly ("memory-safe") {
             v := txdiff(0x09, account, localIndex)
         }

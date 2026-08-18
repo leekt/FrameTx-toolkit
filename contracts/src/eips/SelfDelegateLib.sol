@@ -35,11 +35,7 @@ library SelfDelegateLib {
     /// @return isDelegation  the code is exactly 23 bytes with a known prefix
     /// @return ecdsaDisabled the prefix is `0xef0101`
     /// @return target        the delegate address (zero unless isDelegation)
-    function delegation(address account)
-        internal
-        view
-        returns (bool isDelegation, bool ecdsaDisabled, address target)
-    {
+    function delegation(address account) internal view returns (bool isDelegation, bool ecdsaDisabled, address target) {
         uint256 size;
         bytes32 word;
         assembly ("memory-safe") {

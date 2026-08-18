@@ -27,12 +27,10 @@ contract SponsoringPaymasterTest is FrameTest {
     address paymaster;
 
     function setUp() public {
-        paymaster =
-            deployAccountWithArgs("SponsoringPaymaster", abi.encode(SPONSOR, MAX_SPONSORED_COST));
+        paymaster = deployAccountWithArgs("SponsoringPaymaster", abi.encode(SPONSOR, MAX_SPONSORED_COST));
         vm.deal(paymaster, 10 ether);
 
-        (bool ok, bytes memory ret) =
-            paymaster.staticcall(abi.encodeWithSignature("sponsorSigner()"));
+        (bool ok, bytes memory ret) = paymaster.staticcall(abi.encodeWithSignature("sponsorSigner()"));
         require(ok, "sponsorSigner() failed");
         assertEq(abi.decode(ret, (address)), SPONSOR, "immutable sponsorSigner not filled in");
         (ok, ret) = paymaster.staticcall(abi.encodeWithSignature("maxSponsoredCost()"));
@@ -138,9 +136,7 @@ contract SponsoringPaymasterTest is FrameTest {
     /// Same transaction, but `sigIndex` points at the sender's entry instead of the
     /// sponsor's. The key is protocol-verified; it is simply not the one we sponsor for.
     function test_wrongSignerRefused() public {
-        assertRefusesFrame(
-            paymaster, _payCtx(0, 0.5 ether, SCOPE_PAYMENT), "only the sponsor key may authorise"
-        );
+        assertRefusesFrame(paymaster, _payCtx(0, 0.5 ether, SCOPE_PAYMENT), "only the sponsor key may authorise");
     }
 
     function test_signerThatIsNotTheSponsorRefused() public {
@@ -181,9 +177,7 @@ contract SponsoringPaymasterTest is FrameTest {
 
     /// An out-of-range index halts on the first SIGPARAM, before the scheme check.
     function test_outOfRangeSigIndexRefused() public {
-        assertRefusesFrame(
-            paymaster, _payCtx(7, 0.5 ether, SCOPE_PAYMENT), "sigIndex past the end of the list"
-        );
+        assertRefusesFrame(paymaster, _payCtx(7, 0.5 ether, SCOPE_PAYMENT), "sigIndex past the end of the list");
     }
 
     /// The paymaster is not `tx.sender`, so a `pay` frame may never carry execution.
@@ -197,8 +191,6 @@ contract SponsoringPaymasterTest is FrameTest {
     }
 
     function test_scopeNoneRefused() public {
-        assertRefusesFrame(
-            paymaster, _payCtx(SPONSOR_SIG, 0.5 ether, SCOPE_NONE), "APPROVE_NONE must revert"
-        );
+        assertRefusesFrame(paymaster, _payCtx(SPONSOR_SIG, 0.5 ether, SCOPE_NONE), "APPROVE_NONE must revert");
     }
 }

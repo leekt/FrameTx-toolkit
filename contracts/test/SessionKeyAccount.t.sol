@@ -34,13 +34,9 @@ contract SessionKeyAccountTest is FrameTest {
         // whatever the contract says they are. A silently wrong slot here would make
         // every refusal below pass for the wrong reason.
         vm.startPrank(OWNER);
-        (bool ok,) = account.call(
-            abi.encodeWithSignature("setSessionKey(address,uint64)", SESSION, VALID_UNTIL)
-        );
+        (bool ok,) = account.call(abi.encodeWithSignature("setSessionKey(address,uint64)", SESSION, VALID_UNTIL));
         require(ok, "setSessionKey failed");
-        (ok,) = account.call(
-            abi.encodeWithSignature("setAllowedCall(address,bytes4,bool)", TOKEN, TRANSFER, true)
-        );
+        (ok,) = account.call(abi.encodeWithSignature("setAllowedCall(address,bytes4,bool)", TOKEN, TRANSFER, true));
         require(ok, "setAllowedCall failed");
         vm.stopPrank();
 
@@ -50,16 +46,14 @@ contract SessionKeyAccountTest is FrameTest {
     }
 
     function _sessionKeys(address key) internal view returns (uint64) {
-        (bool ok, bytes memory ret) =
-            account.staticcall(abi.encodeWithSignature("sessionKeys(address)", key));
+        (bool ok, bytes memory ret) = account.staticcall(abi.encodeWithSignature("sessionKeys(address)", key));
         require(ok, "sessionKeys() failed");
         return abi.decode(ret, (uint64));
     }
 
     function _allowedCall(address target, bytes4 selector) internal view returns (bool) {
-        (bool ok, bytes memory ret) = account.staticcall(
-            abi.encodeWithSignature("allowedCall(address,bytes4)", target, selector)
-        );
+        (bool ok, bytes memory ret) =
+            account.staticcall(abi.encodeWithSignature("allowedCall(address,bytes4)", target, selector));
         require(ok, "allowedCall() failed");
         return abi.decode(ret, (bool));
     }
@@ -109,13 +103,11 @@ contract SessionKeyAccountTest is FrameTest {
     }
 
     /// The pre-expiry layout: no deadline anywhere in the transaction.
-    function _ctxNoExpiry(
-        address signer,
-        address target,
-        uint256 value,
-        bytes memory data,
-        uint64 scopes
-    ) internal view returns (IFrameVm.FrameTx memory ctx) {
+    function _ctxNoExpiry(address signer, address target, uint256 value, bytes memory data, uint64 scopes)
+        internal
+        view
+        returns (IFrameVm.FrameTx memory ctx)
+    {
         IFrameVm.FrameTxFrame[] memory frames = new IFrameVm.FrameTxFrame[](2);
         frames[0] = IFrameVm.FrameTxFrame({
             mode: MODE_VERIFY,
@@ -185,9 +177,7 @@ contract SessionKeyAccountTest is FrameTest {
     function test_ownerBypassesTheAllowlist() public {
         assertApprovesFrame(
             account,
-            _ctx(
-                OWNER, OTHER_TOKEN, 1 ether, abi.encodeWithSelector(APPROVE_SEL, OWNER, uint256(1))
-            ),
+            _ctx(OWNER, OTHER_TOKEN, 1 ether, abi.encodeWithSelector(APPROVE_SEL, OWNER, uint256(1))),
             "owner must approve regardless of the frame policy"
         );
     }
@@ -196,9 +186,7 @@ contract SessionKeyAccountTest is FrameTest {
     /// same code serves the sponsored layout where a paymaster approves payment.
     function test_executionOnlyFrameApproves() public {
         assertApprovesFrame(
-            account,
-            _ctx(SESSION, TOKEN, 0, _transfer(), SCOPE_EXECUTION),
-            "flags 0x2 must approve 0x2"
+            account, _ctx(SESSION, TOKEN, 0, _transfer(), SCOPE_EXECUTION), "flags 0x2 must approve 0x2"
         );
     }
 
@@ -217,16 +205,12 @@ contract SessionKeyAccountTest is FrameTest {
     // ------------------------------------------------------------------ negative
 
     function test_unknownSignerRefused() public {
-        assertRefusesFrame(
-            account, _ctx(STRANGER, TOKEN, 0, _transfer()), "an untrusted key must not approve"
-        );
+        assertRefusesFrame(account, _ctx(STRANGER, TOKEN, 0, _transfer()), "an untrusted key must not approve");
     }
 
     function test_sessionKeyOnNonAllowlistedTargetRefused() public {
         assertRefusesFrame(
-            account,
-            _ctx(SESSION, OTHER_TOKEN, 0, _transfer()),
-            "a target outside the allowlist must be refused"
+            account, _ctx(SESSION, OTHER_TOKEN, 0, _transfer()), "a target outside the allowlist must be refused"
         );
     }
 
@@ -240,17 +224,13 @@ contract SessionKeyAccountTest is FrameTest {
 
     /// Session keys never move ETH, even to an allowlisted target.
     function test_sessionKeyWithValueRefused() public {
-        assertRefusesFrame(
-            account, _ctx(SESSION, TOKEN, 1 wei, _transfer()), "a session key must not send value"
-        );
+        assertRefusesFrame(account, _ctx(SESSION, TOKEN, 1 wei, _transfer()), "a session key must not send value");
     }
 
     /// FRAMEDATALOAD zero-pads past the end of `data`, so a short frame would read as
     /// selector 0x00000000 without the explicit length check.
     function test_sessionKeyWithShortFrameDataRefused() public {
-        assertRefusesFrame(
-            account, _ctx(SESSION, TOKEN, 0, hex"a905"), "frame data shorter than a selector"
-        );
+        assertRefusesFrame(account, _ctx(SESSION, TOKEN, 0, hex"a905"), "frame data shorter than a selector");
     }
 
     /// The policy applies to EVERY sender frame, not just the first: approving
@@ -316,8 +296,6 @@ contract SessionKeyAccountTest is FrameTest {
 
     /// Same signer and frames as the positive case; only the permitted scope changes.
     function test_scopeNoneRefused() public {
-        assertRefusesFrame(
-            account, _ctx(SESSION, TOKEN, 0, _transfer(), SCOPE_NONE), "APPROVE_NONE must revert"
-        );
+        assertRefusesFrame(account, _ctx(SESSION, TOKEN, 0, _transfer(), SCOPE_NONE), "APPROVE_NONE must revert");
     }
 }

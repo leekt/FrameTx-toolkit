@@ -38,11 +38,7 @@ library SetDelegateLib {
     /// @notice The address SETDELEGATE assigns for `deployer` and `salt`:
     ///         `keccak256(0xef0100 ++ deployer ++ salt)[12:]`. The 55-byte
     ///         preimage cannot collide with CREATE or CREATE2 derivations.
-    function computeDelegateAddress(address deployer, bytes32 salt)
-        internal
-        pure
-        returns (address)
-    {
+    function computeDelegateAddress(address deployer, bytes32 salt) internal pure returns (address) {
         return address(uint160(uint256(keccak256(abi.encodePacked(DESIGNATOR, deployer, salt)))));
     }
 }

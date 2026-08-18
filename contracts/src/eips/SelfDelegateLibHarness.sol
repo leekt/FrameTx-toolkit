@@ -13,11 +13,7 @@ contract SelfDelegateLibHarness {
         return SelfDelegateLib.setSelfDelegate(target);
     }
 
-    function delegation(address account)
-        external
-        view
-        returns (bool isDelegation, bool ecdsaDisabled, address target)
-    {
+    function delegation(address account) external view returns (bool isDelegation, bool ecdsaDisabled, address target) {
         return SelfDelegateLib.delegation(account);
     }
 

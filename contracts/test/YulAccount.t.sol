@@ -25,11 +25,7 @@ contract YulAccountTest is FrameTest {
         return _ctx(signer, bytes32(0));
     }
 
-    function _ctx(address signer, bytes32 msgHash)
-        internal
-        pure
-        returns (IFrameVm.FrameTx memory ctx)
-    {
+    function _ctx(address signer, bytes32 msgHash) internal pure returns (IFrameVm.FrameTx memory ctx) {
         ctx = verifyContext(ACCOUNT, SCOPE_BOTH, bytes32(0));
         ctx.signatures = new IFrameVm.FrameTxSignature[](1);
         ctx.signatures[0] = secpSig(signer);
