@@ -1,3 +1,4 @@
 # Build outputs of the submodules
 solidity/build/
 contracts/out-frame/
+.DS_Store
