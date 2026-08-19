@@ -51,6 +51,15 @@ contract FrameAccountPolicyTest is Test {
         assertEq(FrameAccountPolicy.countDistinctOwners(_addrs(A), none), 0);
     }
 
+    /// Signature routing belongs to the frame glue: the pure policy must see
+    /// only signers resolved from the indices explicitly selected in signed
+    /// VERIFY-frame calldata, not every signer elsewhere in the envelope.
+    function test_onlySelectedSignersReachPolicy() public pure {
+        address[] memory selected = _addrs(A, D);
+        assertEq(FrameAccountPolicy.countDistinctOwners(selected, _owners3()), 1);
+        assertFalse(FrameAccountPolicy.meetsThreshold(selected, _owners3(), 2));
+    }
+
     // --- meetsThreshold ------------------------------------------------------
 
     function test_thresholdBoundaries() public pure {
@@ -88,7 +97,11 @@ contract FrameAccountPolicyTest is Test {
 
     // --- sessionKeyAllowsCall ------------------------------------------------
 
-    function _key(uint64 until, bool allowValue) internal pure returns (FrameAccountPolicy.SessionKey memory) {
+    function _key(uint64 until, bool allowValue)
+        internal
+        pure
+        returns (FrameAccountPolicy.SessionKey memory)
+    {
         return FrameAccountPolicy.SessionKey({validUntil: until, allowValue: allowValue});
     }
 
@@ -105,8 +118,12 @@ contract FrameAccountPolicyTest is Test {
 
     function test_sessionKeyExpiryIsInclusive() public pure {
         // Valid exactly at the deadline, invalid one second later.
-        assertTrue(FrameAccountPolicy.sessionKeyAllowsCall(_key(1000, false), 1000, C, 0, _addrs(C)));
-        assertFalse(FrameAccountPolicy.sessionKeyAllowsCall(_key(1000, false), 1001, C, 0, _addrs(C)));
+        assertTrue(
+            FrameAccountPolicy.sessionKeyAllowsCall(_key(1000, false), 1000, C, 0, _addrs(C))
+        );
+        assertFalse(
+            FrameAccountPolicy.sessionKeyAllowsCall(_key(1000, false), 1001, C, 0, _addrs(C))
+        );
     }
 
     function test_sessionKeyValueAndAllowlist() public pure {
@@ -117,10 +134,15 @@ contract FrameAccountPolicyTest is Test {
         assertFalse(FrameAccountPolicy.sessionKeyAllowsCall(_key(1000, true), 1, D, 0, _addrs(C)));
     }
 
-    function testFuzz_sessionKeyNeverAllowsUnlistedTarget(address target, uint256 value) public pure {
+    function testFuzz_sessionKeyNeverAllowsUnlistedTarget(address target, uint256 value)
+        public
+        pure
+    {
         vm.assume(target != C && target != B);
         assertFalse(
-            FrameAccountPolicy.sessionKeyAllowsCall(_key(type(uint64).max, true), 1, target, value, _addrs(C, B))
+            FrameAccountPolicy.sessionKeyAllowsCall(
+                _key(type(uint64).max, true), 1, target, value, _addrs(C, B)
+            )
         );
     }
 
@@ -136,7 +158,8 @@ contract FrameAccountPolicyTest is Test {
             firstWord := mload(add(callData, 0x20))
         }
         assertEq(
-            FrameAccountPolicy.selectorOf(firstWord, callData.length), bytes4(keccak256("transfer(address,uint256)"))
+            FrameAccountPolicy.selectorOf(firstWord, callData.length),
+            bytes4(keccak256("transfer(address,uint256)"))
         );
     }
 

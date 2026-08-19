@@ -4,6 +4,11 @@ A third party pays the gas for someone else's transaction. This is the other hal
 account abstraction: example 03/04/05 show an account approving its own *execution*;
 this one shows a different address approving the *payment*.
 
+The storage-backed accounts can also take PAYMENT scope for another sender at the EVM level,
+but that private-inclusion role reads policy storage outside `tx.sender`. This dedicated
+paymaster keeps its validation policy in immutables, avoiding that particular public-mempool
+storage-read violation (while retaining the other caveats below).
+
 Source: [`SponsoringPaymaster.sol`](../src/accounts/SponsoringPaymaster.sol)
 
 ## What it does
@@ -47,17 +52,24 @@ The transaction must use the public mempool's **Canonical Paymaster** prefix
 
 | Frame | Subclass      | Mode    | Flags | Caller        | Target        | Value | Data                            | Purpose |
 | ----- | ------------- | ------- | ----- | ------------- | ------------- | ----- | ------------------------------- | ------- |
-| 0     | `only_verify` | VERIFY  | `0x2` | `ENTRY_POINT` | Null (sender) | 0     | account-specific                | Account validates the tx and calls `APPROVE(APPROVE_EXECUTION)` → sets `sender_approved = true` |
+| 0     | `only_verify` | VERIFY  | `0x2` | `ENTRY_POINT` | Null (sender) | 0     | `validate(uint256[] accountSignatureIndices)` for the toolkit accounts | Account validates selected entries and calls `APPROVE(APPROVE_EXECUTION)` → sets `sender_approved = true` |
 | 1     | `pay`         | VERIFY  | `0x1` | `ENTRY_POINT` | **this paymaster** | 0 | `sponsorTransaction(uint256 sigIndex)` | Checks the sponsor signature, calls `APPROVE(APPROVE_PAYMENT)` → sets `payer = paymaster`, collects `max_cost` |
 | 2     | `user_op`     | SENDER  | `0x0` | sender        | whatever      | any   | the user's call                 | The actual operation, `caller == tx.sender` |
 
-`tx.signatures` must contain at least two entries: the account's own (whatever frame 0
-requires) and the sponsor's, at `sigIndex`. The sponsor entry is `scheme = SECP256K1`,
+`tx.signatures` must contain the entries required by the sender account and the sponsor's
+entry at `sigIndex`. With separate account and sponsor keys that means at least two entries.
+The account receives only its own selected indices through frame 0; this paymaster receives
+its selected index through frame 1. Neither component has to assume signature zero or scan
+the other component's entries. The sponsor entry is `scheme = SECP256K1`,
 `signer = <sponsorSigner address>`, `msg = <empty>`, signed over `compute_sig_hash(tx)`.
 
 Frame 1 data is a normal ABI call: selector `0x217de4d8` followed by the 32-byte
 `sigIndex`. For a two-signature transaction with the account's signature at index 0, that
 is `0x217de4d8` + `0x00…01`.
+
+Both pieces of routing are authenticated. The account index array and the paymaster's
+`sigIndex` are frame calldata, hence part of the frame list covered by every canonical
+transaction signature.
 
 ### Ordering requirement — the `pay` frame MUST come after `only_verify`
 
@@ -160,6 +172,41 @@ The `pay` frame cannot read the sponsee's token balance (that is storage outside
 inclusion. The sponsor pays gas in ETH at `APPROVE` time and only discovers the token
 transfer failed afterwards. Mitigations (a deposit held by the paymaster, a pre-authorised
 allowance pull, tight expiry) are out of scope here.
+
+## Reusable paymaster conformance suite
+
+`test/SponsoringPaymaster.t.sol` inherits
+[`PaymasterTestSuite`](../test/PaymasterTestSuite.sol). A new paymaster test can inherit the
+same suite by deploying, configuring, and funding its subject in `setUp()`, then implementing:
+
+```solidity
+function _paymasterUnderTest() internal view returns (address);
+function _paymasterTestSignatures()
+    internal view
+    returns (IFrameVm.FrameTxSignature[] memory);
+function _paymasterTestCall(uint256[] memory signatureIndices)
+    internal view
+    returns (bytes memory);
+function _paymasterTestMaxCost() internal view returns (uint256);
+
+// Optional: configure a sender allowlist or sender-specific proof fixture.
+function _preparePaymasterForAccount(address account) internal;
+```
+
+`_paymasterTestSignatures()` may return an empty array for a policy that does not authorize
+through signature entries. In that case the index-misrouting case is inapplicable; the five
+account sponsorship cases still run. The optional preparation hook defaults to a no-op.
+
+The suite builds one shared, shifted signature envelope and requires the paymaster to sponsor
+`OwnerAccount`, `MultisigAccount`, `SessionKeyAccount` through its owner path, the portable
+Yul account, and the builtin Yul account. It also proves that routing the paymaster to the
+account's selected entries is refused when the paymaster uses signatures. Each fixture invokes the account's `EXECUTION` path
+and then the paymaster's `PAYMENT` path with independently installed synthetic context;
+`sender_approved` does not persist between those calls.
+
+These are opcode-level conformance tests: they prove the correct approval path and scope,
+not the eventual ETH debit or refund. Transaction-level accounting belongs in the Anvil
+raw-transaction suite.
 
 ## Ambiguities and surprises in the spec
 

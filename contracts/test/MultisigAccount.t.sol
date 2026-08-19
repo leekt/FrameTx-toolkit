@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {FrameTest, IFrameVm} from "./FrameTest.sol";
+import {AccountTestSuite} from "./AccountTestSuite.sol";
+import {IFrameVm} from "./FrameTest.sol";
 
 /// contracts/src/accounts/MultisigAccount.sol, executed against the real opcodes.
 ///
@@ -10,7 +11,7 @@ import {FrameTest, IFrameVm} from "./FrameTest.sol";
 /// an explicit digest. These tests assert the account counts only distinct owner
 /// entries with `msgHash == 0`, meaning they signed THIS transaction, and approves
 /// once `threshold` is reached.
-contract MultisigAccountTest is FrameTest {
+contract MultisigAccountTest is AccountTestSuite {
     /// Deliberately ascending: the account dedups by requiring counted owners to
     /// appear in strictly ascending address order, so a fixture in any other order
     /// would test the sort rule instead of the threshold rule.
@@ -36,6 +37,21 @@ contract MultisigAccountTest is FrameTest {
         assertFalse(_isOwner(STRANGER_X), "stranger must not be an owner");
     }
 
+    function accountUnderTest() internal view override returns (address) {
+        return account;
+    }
+
+    function accountAuthorizationSignatures()
+        internal
+        pure
+        override
+        returns (IFrameVm.FrameTxSignature[] memory signatures)
+    {
+        signatures = new IFrameVm.FrameTxSignature[](2);
+        signatures[0] = secpSig(OWNER_A);
+        signatures[1] = secpSig(OWNER_B);
+    }
+
     function _threshold() internal view returns (uint256) {
         (bool ok, bytes memory ret) = account.staticcall(abi.encodeWithSignature("threshold()"));
         require(ok, "threshold() failed");
@@ -43,23 +59,28 @@ contract MultisigAccountTest is FrameTest {
     }
 
     function _isOwner(address who) internal view returns (bool) {
-        (bool ok, bytes memory ret) = account.staticcall(abi.encodeWithSignature("isOwner(address)", who));
+        (bool ok, bytes memory ret) =
+            account.staticcall(abi.encodeWithSignature("isOwner(address)", who));
         require(ok, "isOwner() failed");
         return abi.decode(ret, (bool));
     }
 
-    /// A self-relay VERIFY frame carrying `validate()`, with the given signature list.
-    function _ctx(uint64 scopes, IFrameVm.FrameTxSignature[] memory sigs)
-        internal
-        view
-        returns (IFrameVm.FrameTx memory ctx)
-    {
+    /// A self-relay VERIFY frame carrying `validate(uint256[])`, with the given signature list.
+    function _ctx(
+        uint64 scopes,
+        IFrameVm.FrameTxSignature[] memory sigs,
+        uint256[] memory signatureIndices
+    ) internal view returns (IFrameVm.FrameTx memory ctx) {
         ctx = verifyContext(account, scopes, bytes32(uint256(0xf00d)));
-        ctx.frames[0].data = abi.encodeWithSignature("validate()");
+        ctx.frames[0].data = validationCalldata(signatureIndices);
         ctx.signatures = sigs;
     }
 
-    function _sigs(address a, address b) internal pure returns (IFrameVm.FrameTxSignature[] memory sigs) {
+    function _sigs(address a, address b)
+        internal
+        pure
+        returns (IFrameVm.FrameTxSignature[] memory sigs)
+    {
         sigs = new IFrameVm.FrameTxSignature[](2);
         sigs[0] = secpSig(a);
         sigs[1] = secpSig(b);
@@ -68,7 +89,11 @@ contract MultisigAccountTest is FrameTest {
     // ------------------------------------------------------------------ positive
 
     function test_thresholdOfOwnersApproves() public {
-        assertApprovesFrame(account, _ctx(SCOPE_BOTH, _sigs(OWNER_A, OWNER_B)), "2-of-3 must approve");
+        assertApprovesFrame(
+            account,
+            _ctx(SCOPE_BOTH, _sigs(OWNER_A, OWNER_B), selected(0, 1)),
+            "2-of-3 must approve"
+        );
     }
 
     /// The third owner is not required, and a set above the threshold still approves.
@@ -77,13 +102,19 @@ contract MultisigAccountTest is FrameTest {
         sigs[0] = secpSig(OWNER_A);
         sigs[1] = secpSig(OWNER_B);
         sigs[2] = secpSig(OWNER_C);
-        assertApprovesFrame(account, _ctx(SCOPE_BOTH, sigs), "3-of-3 must approve");
+        assertApprovesFrame(
+            account, _ctx(SCOPE_BOTH, sigs, selected(0, 1, 2)), "3-of-3 must approve"
+        );
     }
 
     /// The account approves `frame.flags & 0x3` rather than a hardcoded 0x3, so the
     /// same code serves the sponsored layout where a paymaster approves payment.
     function test_executionOnlyFrameApproves() public {
-        assertApprovesFrame(account, _ctx(SCOPE_EXECUTION, _sigs(OWNER_A, OWNER_B)), "flags 0x2 must approve 0x2");
+        assertApprovesFrame(
+            account,
+            _ctx(SCOPE_EXECUTION, _sigs(OWNER_A, OWNER_B), selected(0, 1)),
+            "flags 0x2 must approve 0x2"
+        );
     }
 
     /// Foreign entries -- a paymaster's own signature, say -- must be skipped rather
@@ -96,7 +127,11 @@ contract MultisigAccountTest is FrameTest {
         });
         sigs[1] = secpSig(OWNER_A);
         sigs[2] = secpSig(OWNER_B);
-        assertApprovesFrame(account, _ctx(SCOPE_BOTH, sigs), "ARBITRARY entry must not break 2-of-3");
+        assertApprovesFrame(
+            account,
+            _ctx(SCOPE_BOTH, sigs, selected(0, 1, 2)),
+            "ARBITRARY entry must not break 2-of-3"
+        );
     }
 
     // ------------------------------------------------------------------ negative
@@ -104,23 +139,37 @@ contract MultisigAccountTest is FrameTest {
     function test_singleOwnerBelowThresholdRefused() public {
         IFrameVm.FrameTxSignature[] memory sigs = new IFrameVm.FrameTxSignature[](1);
         sigs[0] = secpSig(OWNER_A);
-        assertRefusesFrame(account, _ctx(SCOPE_BOTH, sigs), "1-of-3 is below the threshold");
+        assertRefusesFrame(
+            account, _ctx(SCOPE_BOTH, sigs, selected(0)), "1-of-3 is below the threshold"
+        );
     }
 
     function test_nonOwnersRefused() public {
-        assertRefusesFrame(account, _ctx(SCOPE_BOTH, _sigs(STRANGER_X, STRANGER_Y)), "non-owners must not approve");
+        assertRefusesFrame(
+            account,
+            _ctx(SCOPE_BOTH, _sigs(STRANGER_X, STRANGER_Y), selected(0, 1)),
+            "non-owners must not approve"
+        );
     }
 
     /// One owner cannot reach the threshold by signing twice: counted owners must
     /// strictly ascend, and a repeat is not greater than itself.
     function test_duplicateOwnerRefused() public {
-        assertRefusesFrame(account, _ctx(SCOPE_BOTH, _sigs(OWNER_A, OWNER_A)), "a repeated owner must not count twice");
+        assertRefusesFrame(
+            account,
+            _ctx(SCOPE_BOTH, _sigs(OWNER_A, OWNER_A), selected(0, 1)),
+            "a repeated owner must not count twice"
+        );
     }
 
     /// Same two owners as the positive case, descending. The dedup rule is a hard
     /// require, so a mis-ordered envelope invalidates rather than silently counting one.
     function test_descendingOwnerOrderRefused() public {
-        assertRefusesFrame(account, _ctx(SCOPE_BOTH, _sigs(OWNER_B, OWNER_A)), "owner sigs must be sorted ascending");
+        assertRefusesFrame(
+            account,
+            _ctx(SCOPE_BOTH, _sigs(OWNER_B, OWNER_A), selected(0, 1)),
+            "owner sigs must be sorted ascending"
+        );
     }
 
     /// A non-zero `msg` is a digest the owner signed in some other context. Counting
@@ -128,7 +177,9 @@ contract MultisigAccountTest is FrameTest {
     function test_explicitDigestNotCounted() public {
         IFrameVm.FrameTxSignature[] memory sigs = _sigs(OWNER_A, OWNER_B);
         sigs[1].msgHash = bytes32(uint256(0xbeef));
-        assertRefusesFrame(account, _ctx(SCOPE_BOTH, sigs), "explicit-digest entry must not count");
+        assertRefusesFrame(
+            account, _ctx(SCOPE_BOTH, sigs, selected(0, 1)), "explicit-digest entry must not count"
+        );
     }
 
     /// P256 entries are protocol-verified too, but this account restricts itself to
@@ -136,12 +187,18 @@ contract MultisigAccountTest is FrameTest {
     function test_p256EntryNotCounted() public {
         IFrameVm.FrameTxSignature[] memory sigs = _sigs(OWNER_A, OWNER_B);
         sigs[1].scheme = 2;
-        assertRefusesFrame(account, _ctx(SCOPE_BOTH, sigs), "P256 entry must not count here");
+        assertRefusesFrame(
+            account, _ctx(SCOPE_BOTH, sigs, selected(0, 1)), "P256 entry must not count here"
+        );
     }
 
     /// Same signers that approve above; only the frame's permitted scope changes.
     /// APPROVE_NONE always reverts, so a frame granting nothing invalidates the tx.
     function test_scopeNoneRefused() public {
-        assertRefusesFrame(account, _ctx(SCOPE_NONE, _sigs(OWNER_A, OWNER_B)), "APPROVE_NONE must revert");
+        assertRefusesFrame(
+            account,
+            _ctx(SCOPE_NONE, _sigs(OWNER_A, OWNER_B), selected(0, 1)),
+            "APPROVE_NONE must revert"
+        );
     }
 }

@@ -1,56 +1,141 @@
 # 03 — Single-owner smart account (Solidity)
 
-The canonical EIP-8141 account: one owner key in storage, one validation function,
-no signature verification code at all.
-
-`OwnerAccount.validate()` is what the `ENTRY_POINT` calls for the `VERIFY` frame. It does
-exactly two reads and one approval, through [`FrameTxLib`](07-frametx-library.md):
+`OwnerAccount` is the canonical EIP-8141 starting point: one owner key in storage, no
+`ecrecover`, and no `execute()` wrapper. It implements the shared account ABI:
 
 ```solidity
-if (FrameTxLib.sigSigner(0) != owner || !FrameTxLib.signedThisTx(0)) revert();
-FrameTxLib.approve(FrameTxLib.SCOPE_BOTH);      // APPROVE_EXECUTION_AND_PAYMENT
+function validate(uint256[] calldata signatureIndices) external;
 ```
 
-The library is `internal`, so this inlines to the bare opcodes — `sigparam(0, 0x00)` for
-the signer, `sigparam(0, 0x02)` for the `msg` field, `approvetx(0, 0, 3)` — with no
-dispatch or linking; the disassembly below shows exactly that.
+The selector is `0x25b90494`. The VERIFY frame passes the indices of the entries in
+`tx.signatures` that this account should inspect. The account loops over only those selected
+entries and succeeds when at least one is a protocol-validated signature by `owner` over the
+canonical transaction hash.
 
-The protocol verified the secp256k1 (or P256) signature against its selected message
-**before frame 0 ran**. `SIGPARAM` hands the account the already-verified result. The
-account's policy asks both: *do I trust that key, and was the selected message this
-transaction's canonical hash?*
+```solidity
+bool ownerSigned;
+for (uint256 i; i < signatureIndices.length; ++i) {
+    uint256 sigIndex = signatureIndices[i];
+    if (FrameTxLib.sigScheme(sigIndex) == FrameTxLib.SCHEME_ARBITRARY) continue;
+    if (!FrameTxLib.signedThisTx(sigIndex)) continue;
+    if (FrameTxLib.sigSigner(sigIndex) == owner) {
+        ownerSigned = true;
+        break;
+    }
+}
+if (!ownerSigned) revert NoTrustedSignature();
 
-## Frame layout
+uint256 scope = FrameTxLib.frameAllowedScope(FrameTxLib.currentFrameIndex());
+if (scope == FrameTxLib.SCOPE_NONE) revert NothingToApprove();
+FrameTxLib.approve(scope);
+```
 
-A transaction from this account must look like this. Frame 0 is a `self_verify` frame in
-mempool terms; everything after it is the user's actual operation.
+The protocol verified every `SECP256K1` or `P256` signature before any frame ran. The
+contract is deciding which verified key it trusts and whether that key signed
+`compute_sig_hash(tx)`; it is not repeating the cryptography. `ARBITRARY` entries are skipped
+before reading `resolved_signer`, because that field does not exist for that scheme.
 
-| # | Mode        | Flags                                | Target                          | Value  | Data                       | Purpose |
-|---|-------------|--------------------------------------|---------------------------------|--------|----------------------------|---------|
-| 0 | `VERIFY` (1)| `0x3` (`APPROVE_EXECUTION_AND_PAYMENT`) | `null` (⇒ `tx.sender`) or the account address | 0 | `0x6901f668` (`validate()`) | Checks the owner signed, then `APPROVE(0x3)`: authorises later `SENDER` frames and pays `max_cost` |
-| 1 | `SENDER` (2)| `0x0`                                | whatever the user is calling    | amount | the user's calldata        | Runs with `caller == tx.sender == this account` |
-| … | `SENDER` (2)| `0x0` or `0x4` (atomic batch)        | …                               | …      | …                          | Any number of further operations |
+## Why indices are frame input
 
-Envelope fields:
+Several accounts and a paymaster may share one signature envelope. Passing indices in the
+VERIFY frame routes the relevant entries without requiring every account to scan the whole
+list or assume its signature is entry zero. An owner signature can be at any envelope
+position, but it counts only if its index appears in `signatureIndices`. An empty list, a
+list containing only foreign entries, or an unselected owner signature does not authorize.
 
-- `sender` = the account address.
-- `signatures` = `[[0x1 (SECP256K1), <owner address, 20 bytes>, <empty msg>, v‖r‖s]]`.
+This routing is not unsigned metadata. VERIFY-frame calldata is part of the frame list, and
+the frame list is part of the canonical transaction signature hash. Every accepted
+empty-`msg` signature therefore commits to the index array. An out-of-range selected index
+fails when `SIGPARAM` applies its bounds check.
 
-  **The `signer` field must carry the owner's address.** An empty `signer` resolves to
-  `tx.sender` — which is the *account*, not the owner — and validation would reject it.
-  (Empty `signer` is the EOA / default-code case, example 01, where the two are the same
-  address.) Leaving `msg` empty is what makes the signature cover
-  `compute_sig_hash(tx)`; `sigparam(0, 0x02)` returns 0 for that case, which is the check
-  in `validate()`.
+## One validator, three roles
 
-- Frame 0's `gas_limit` plus the 2800 gas signature cost must stay under `MAX_VERIFY_GAS`
-  (100 000) for public-mempool propagation. `validate()` is one cold `SLOAD` plus a
-  handful of 2-gas instructions, so this is not a constraint in practice.
+The account reads the current frame's `allowed_scope` (`flags & 0x3`) instead of hardcoding
+`BOTH`. Consequently the same deployed code supports all three approval roles:
 
-No frame ever calls an `execute()` function on the account: in `SENDER` mode the protocol
-*is* the executor, and `msg.sender` for frame 1 is the account itself. Which is also how
-`setOwner` is reachable — a `SENDER` frame targeting the account, guarded by
-`msg.sender == address(this)`.
+| Role | VERIFY target | Flags / scope | Effect |
+|---|---|---|---|
+| Validate and pay for itself | this account, also `tx.sender` | `0x3` (`BOTH`) | Grants execution and pays `max_cost` |
+| Validate with a paymaster | this account, also `tx.sender` | `0x2` (`EXECUTION`) | Grants execution; a later paymaster frame pays |
+| Pay for another account | this account, different from `tx.sender` | `0x1` (`PAYMENT`) | Pays after the sender has already granted execution |
+
+`APPROVE` enforces that the requested scope is non-zero and is a subset of the frame flags.
+Execution approval additionally requires `resolved_target == tx.sender`; payment approval
+does not. PAYMENT also requires `sender_approved == true`, so a third-party payer frame must
+come after the sender's execution validator.
+
+### Self-funded transaction
+
+| # | Mode | Flags | Target | Data | Purpose |
+|---|---|---|---|---|---|
+| 0 | `VERIFY` | `0x3` | account or null | `validate([ownerSigIndex])` | Authenticate, grant execution, fund gas |
+| 1… | `SENDER` | operation flags | user-selected target | operation calldata | Execute with `caller == tx.sender == account` |
+
+### Externally sponsored transaction
+
+| # | Mode | Flags | Target | Data | Purpose |
+|---|---|---|---|---|---|
+| 0 | `VERIFY` | `0x2` | account or null | `validate([ownerSigIndex])` | Authenticate and grant execution only |
+| 1 | `VERIFY` | `0x1` | paymaster | paymaster-specific | Approve payment after execution is approved |
+| 2… | `SENDER` | operation flags | user-selected target | operation calldata | User operation |
+
+### Paying for another sender
+
+| # | Mode | Flags | Target | Data | Purpose |
+|---|---|---|---|---|---|
+| 0 | `VERIFY` | `0x2` | `tx.sender` account | sender-specific | Sender authenticates and grants execution |
+| 1 | `VERIFY` | `0x1` | this funded account | `validate([payerOwnerSigIndex])` | Payer owner authenticates and grants payment |
+| 2… | `SENDER` | operation flags | user-selected target | operation calldata | Other sender's operation |
+
+The payer owner's canonical signature covers the other sender, fees, frames, and selected
+index, so payment is limited to the exact transaction the owner signed.
+
+This third layout is supported by the EVM and is useful with private inclusion. It is not
+eligible for the public mempool with this implementation: reading `owner` performs an
+`SLOAD` in an account other than `tx.sender`, while the generic public-pool validation rule
+rejects storage reads outside `tx.sender`. Use a paymaster whose policy satisfies those
+rules for public-pool sponsorship.
+
+## Signature requirements
+
+For each selected owner entry:
+
+| Field | Requirement |
+|---|---|
+| `scheme` | `SECP256K1` or `P256`; `ARBITRARY` is ignored |
+| `signer` | resolves to the stored owner address |
+| `msg` | empty, so the protocol checked `compute_sig_hash(tx)` |
+| `signature` | valid for the selected scheme; protocol-checked before frame execution |
+
+An empty `signer` resolves to `tx.sender`. For a contract account whose owner is a separate
+key, the envelope should therefore carry the owner address explicitly. A non-empty 32-byte
+`msg` is a valid signature over an explicit digest, but it does not commit to this frame
+transaction and is deliberately ignored.
+
+## No `execute()` function
+
+A `SENDER` frame is the execution mechanism. The protocol calls its target with
+`caller = tx.sender`, so the account does not decode or redispatch an operation. Owner
+rotation is a `SENDER` frame targeting the account's `setOwner(address)` function;
+`msg.sender == address(this)` protects that self-call path.
+
+## Read-only validation and funding
+
+A `VERIFY` frame runs under `STATICCALL` rules. Before approval this function performs only
+calldata reads, `SLOAD`, and frame/signature introspection. `APPROVE` is the sole permitted
+transaction-state mutation, which is why `validate` cannot be declared `view`. A rejection
+reverts the VERIFY frame and invalidates the whole transaction; there is no boolean failure
+return.
+
+The account has `receive()` because either `BOTH` or `PAYMENT` approval requires the payer
+to hold the full `max_cost` when `APPROVE` executes.
+
+## Introspection helper
+
+`frameContext()` is a read-only demonstration, not part of validation. It reports the
+canonical signature hash, current frame index, flags, mode, and signer at envelope index
+zero. The validator itself does not use that hardcoded index; it consumes the indices passed
+to `validate(uint256[])`.
 
 ## Compiling
 
@@ -59,154 +144,34 @@ cd contracts
 ../foundry/target/debug/forge build
 ```
 
-Compiles with zero errors (one unavoidable warning that this is a pre-release compiler).
+The metadata-free deployed bytecode is written to
+`out/OwnerAccount.sol/OwnerAccount.json`. `FrameTxLib` functions inline to `SIGPARAM`,
+`TXPARAM`, `FRAMEPARAM`, and `APPROVE`; there is no linked runtime library.
 
-Runtime bytecode — **435 bytes** (`cbor_metadata = false`, so no trailing metadata; the
-current bytes live in `out/OwnerAccount.sol/OwnerAccount.json` (`deployedBytecode`)).
+Selectors:
 
-`validate()`'s body is 60 bytes of it (`5f8054…aa`), dispatch excluded — note there is no
-trace of `FrameTxLib` left, just the opcodes:
+| Selector | Function |
+|---|---|
+| `0x25b90494` | `validate(uint256[])` |
+| `0x8da5cb5b` | `owner()` |
+| `0x13af4035` | `setOwner(address)` |
+| `0xde3abbac` | `frameContext()` |
 
-```
-5f 80 54              PUSH0 DUP1 SLOAD              owner, from slot 0
-6001600160a01b0316    PUSH1 1 PUSH1 1 PUSH1 a0 SHL SUB AND   the usual address mask
-90 80 b4              SWAP1 DUP1 SIGPARAM           sigparam(0, 0x00) -> resolved signer
-6001600160a01b0316    (mask again)
-14 15 80              EQ ISZERO DUP1                signer != owner
-610171 57             PUSH2 0171 JUMPI              short-circuit the || on mismatch
-50 6002 5f b4         POP PUSH1 2 PUSH0 SIGPARAM    sigparam(0, 0x02) -> msg
-15 15                 ISZERO ISZERO                 msg != 0
-5b 15                 JUMPDEST ISZERO               either failure flag, inverted
-61017a 57             PUSH2 017a JUMPI              take the approval path if ok
-5f 5f fd              PUSH0 PUSH0 REVERT            …otherwise kill the transaction
-5b 610184             JUMPDEST PUSH2 0184
-6003 80 5f 5f aa      PUSH1 3 DUP1 PUSH0 PUSH0 APPROVE   approvetx(offset=0, length=0, scope=3)
-5b 56                 unreachable; APPROVE halts the frame
-```
+## Testing
 
-Note the push order at the end: `scope` is pushed first because it is deepest on the
-stack, `offset` last because it is on top.
-
-Selectors: `validate()` `0x6901f668`, `owner()` `0x8da5cb5b`, `setOwner(address)`
-`0x13af4035`, `frameContext()` `0xde3abbac`.
-
-## Why `validate()` cannot be `view`
-
-`APPROVE` changes transaction-scoped state: it sets `sender_approved`, sets `payer`,
-increments the sender's nonce, and collects `max_cost` from the payer. Solidity therefore
-classifies `approvetx` as state-modifying, and a `view` (or `pure`) function containing it
-does not compile. That is not a quirk of the compiler — it is the point. `APPROVE` is the
-*only* instruction allowed to change state from a `VERIFY` frame, because a `VERIFY` frame
-executes as a `STATICCALL`: no `SSTORE`, no `LOG`, no state-changing calls, no nonce
-bumping of your own. Everything else in the function is necessarily a read.
-
-`frameContext()` is `view`: `TXPARAM`, `FRAMEPARAM`, `FRAMEDATA*` and `SIGPARAM` read
-transaction context, so they cannot be `pure`, but they modify nothing.
-
-Rejection is `revert(0, 0)`, not a boolean return code. A reverting `VERIFY` frame makes
-the entire transaction invalid — it never lands on chain, and any `APPROVE` already
-performed is unrolled. There is no "validation failed but the transaction still executes"
-state to encode.
-
-## The introspection surface
-
-`frameContext()` exists purely to show what the account can see. It is not called during
-validation:
-
-| Call | Returns |
-|------|---------|
-| `txparam(0x08)` | the canonical signature hash — the digest every empty-`msg` signature signed |
-| `txparam(0x0a)` | the index of the frame currently executing |
-| `frameparam(i, 0x02)` | frame `i`'s mode (0 `DEFAULT`, 1 `VERIFY`, 2 `SENDER`) |
-| `frameparam(i, 0x03)` | frame `i`'s flags; `& 0x3` is the approval scope the frame may request |
-| `sigparam(0, 0x00)` | resolved signer of signature 0 |
-
-Other things a stricter account would reach for, none of which this one needs:
-
-- `frameparam(i, 0x00)` — frame `i`'s `resolved_target`, and `framedatacopy(memOffset,
-  dataOffset, length, i)` / `framedataload(offset, i)` for its calldata. Together these
-  let a `VERIFY` frame inspect exactly what it is about to authorise (a session-key or
-  paymaster account does this; see examples 05 and 06). This account approves everything
-  the owner signed, so it looks at nothing.
-- `txparam(0x06)` — `max_cost`, i.e. what approving payment will cost at worst.
-- `sigparam(i, 0x01)` — the `scheme`. Not checked here on purpose: a `P256` entry resolves
-  to `keccak256(qx‖qy)[12:]`, so hitting a chosen 20-byte owner with a P256 key is as hard
-  as hitting it with a secp256k1 key, and an `ARBITRARY` entry has no resolved signer at
-  all (`sigparam(i, 0x00)` halts on it).
-
-**Operand order.** Yul's first argument is the top stack item. So the stack tables in the
-spec read left-to-right as the Yul argument list — with one trap:
-`framedataload(offset, frameIndex)` takes `offset` first (the spec puts `offset` at
-`top - 0`), while `frameparam(frameIndex, param)` and `sigparam(signatureIndex, param)`
-take their index first. The index is *not* uniformly the first argument.
-
-## Why this is so much smaller than an ERC-4337 account
-
-A 4337 `validateUserOp` has to: hash the user operation itself, `ecrecover` a signature out
-of `userOp.signature`, apply the EIP-191 prefix, handle malleability, manage its own nonce
-key, and pay or delegate a deposit to the EntryPoint contract. That is 2–4 KB of runtime
-code, and every byte of it is consensus-critical logic re-implemented per account.
-
-Here the protocol does all of it before any EVM code runs:
-
-- signature verification (secp256k1 and P256), with low-`s` canonicalisation enforced by
-  the validity rules;
-- binding the signature to the transaction, via the canonical signature hash;
-- replay protection, via the sender's protocol nonce;
-- fee collection, via `APPROVE` setting `payer` and pulling `max_cost`.
-
-What is left for the account is a two-term boolean: *the resolved signer is my owner* and
-*it signed this transaction's hash*. 435 bytes of code, most of which is ABI dispatch and
-the `owner()`/`setOwner`/`frameContext()` accessors — `validate()`'s body is 60 bytes.
-
-The corollary is that an account cannot get signature verification wrong any more. It can
-still get *policy* wrong; skipping the `msg` check below is the interesting way to do that.
+`test/OwnerAccount.t.sol` inherits the reusable
+[`AccountTestSuite`](../test/AccountTestSuite.sol). Besides owner-specific rejection cases,
+the inherited matrix proves shifted selected-index routing, all three approval roles, exact
+scope behavior, and the ETH-funding path. A new account test can obtain the same coverage by
+implementing `accountUnderTest()` and `accountAuthorizationSignatures()`.
 
 ## Security notes
 
-- **Why the `msg` check matters.** `sigparam(0, 0x02)` returns the signature entry's `msg`
-  field. Zero means "signed `compute_sig_hash(tx)`" (the spec makes the explicit all-zero
-  digest invalid precisely to reserve zero for this). A non-zero `msg` is an arbitrary
-  32-byte digest the owner signed somewhere else, sometime else — an off-chain login
-  challenge, a permit, a different chain. Omit this check and any such signature becomes a
-  blank cheque over the account, because the envelope's `msg` field is attacker-chosen.
-  The default code in the spec makes the same check (`sig.msg == Bytes()`).
-- **This account cannot be made to pay for a stranger's transaction.** `APPROVE` reverts
-  unless the requested scope is a subset of `frame.flags & 0x3`, and the transaction is
-  statically invalid if a frame with `APPROVE_EXECUTION` set has a target other than
-  `tx.sender`. `validate()` only ever requests `0x3`, so the only frame it can succeed in
-  is one targeting itself as the sender. A `pay`-only frame (`flags == 0x1`) pointed at
-  this account by someone else's transaction makes `approvetx(0, 0, 3)` revert, which
-  invalidates that transaction rather than costing the owner anything.
-- **No `ENTRY_POINT` caller check is needed.** `APPROVE` itself reverts when
-  `ADDRESS != resolved_target`, so `validate()` reached through an inner `CALL` from some
-  other contract cannot approve anything. An explicit `msg.sender == address(0xaa)` check
-  would be redundant; it is left out deliberately so the trust argument stays visible.
-- **`receive()` is required.** `APPROVE_PAYMENT` reverts if the payer's balance does not
-  cover `max_cost`, so the account has to be able to hold ETH.
-
-## Spec ambiguities encountered
-
-1. **`FRAMEDATALOAD` operand order** is stated as `offset` at `top - 0`, `frameIndex` at
-   `top - 1` (spec § `FRAMEDATALOAD`), i.e. `framedataload(offset, frameIndex)` — the
-   opposite of `FRAMEPARAM`/`SIGPARAM`, which put the index on top. Some circulating
-   summaries list it index-first. The revm implementation in
-   `revm/crates/interpreter/src/instructions/frame_tx.rs` pops `offset` first, matching the
-   local implementation spec.
-   Not used by this example, but stated here because it is easy to get backwards.
-2. **Exceptional halt vs. revert in a `VERIFY` frame.** The spec says "if the frame
-   reverts, the transaction is invalid". It does not spell out an *exceptional halt* —
-   which is what `sigparam(0, 0x00)` on an `ARBITRARY` entry, or an out-of-bounds index,
-   produces. The patched revm fixture surfaces both as a failed frame call; the account tests
-   rely on that fatal validation outcome. The distinction is otherwise observable only in
-   gas accounting for an already-invalid transaction.
-3. **`VERIFY` frame data is unconstrained.** The spec's structural rules for `self_verify`
-   fix mode, flags, target, and the `APPROVE` scope, but say nothing about `frame.data`.
-   The examples in the spec all show empty data. This example puts a 4-byte selector there
-   so the account can keep a plain `receive()` for ETH; nothing in the spec forbids it, but
-   it is worth knowing the choice is not spelled out either way. Cost: 64 gas of calldata.
-4. **A `VERIFY` frame that returns without approving** is not called out as an error at the
-   protocol level — the transaction simply fails later when `payer` is still unset (unless
-   another frame pays). Only the mempool structural rules require `self_verify` to
-   *successfully* call `APPROVE`. `validate()` reverts instead of returning quietly, which
-   fails fast and is what the mempool rules expect.
+- Filtering the scheme before requesting `resolved_signer` avoids an exceptional halt on
+  selected `ARBITRARY` entries. An out-of-range index still halts at the bounds check and
+  makes validation fail.
+- The empty-`msg` check is load-bearing. Accepting an explicit digest would let an unrelated
+  owner signature authorize a frame list it never committed to.
+- `APPROVE` itself checks that the executing code is the resolved frame target, so an inner
+  call cannot borrow this account's approval authority.
+- Scope zero is rejected explicitly; `APPROVE_NONE` cannot be used as a successful no-op.

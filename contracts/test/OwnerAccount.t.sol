@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {FrameTest, IFrameVm} from "./FrameTest.sol";
+import {AccountTestSuite} from "./AccountTestSuite.sol";
+import {IFrameVm} from "./FrameTest.sol";
 
 /// examples/03-solidity-owner-account, executed against the real opcodes.
-contract OwnerAccountTest is FrameTest {
+contract OwnerAccountTest is AccountTestSuite {
     address constant ACCOUNT = address(0xACC0);
     address constant OWNER = address(0x0BEEF);
     address constant STRANGER = address(0xBAD);
@@ -14,12 +15,26 @@ contract OwnerAccountTest is FrameTest {
         vm.store(ACCOUNT, bytes32(0), bytes32(uint256(uint160(OWNER))));
     }
 
-    /// The frame data must carry `validate()`. OwnerAccount has a `receive()`, so an
+    function accountUnderTest() internal pure override returns (address) {
+        return ACCOUNT;
+    }
+
+    function accountAuthorizationSignatures()
+        internal
+        pure
+        override
+        returns (IFrameVm.FrameTxSignature[] memory signatures)
+    {
+        signatures = new IFrameVm.FrameTxSignature[](1);
+        signatures[0] = secpSig(OWNER);
+    }
+
+    /// The frame data must carry `validate(uint256[])`. OwnerAccount has a `receive()`, so an
     /// empty-calldata call succeeds whoever signed, and every assertion built on one
     /// is vacuous -- hence `assertApprovesFrame` rather than `assertApproves`.
     function _ctx(address signer) internal pure returns (IFrameVm.FrameTx memory ctx) {
         ctx = verifyContext(ACCOUNT, SCOPE_BOTH, bytes32(0));
-        ctx.frames[0].data = abi.encodeWithSignature("validate()");
+        ctx.frames[0].data = validationCalldata(selected(0));
         ctx.signatures = new IFrameVm.FrameTxSignature[](1);
         ctx.signatures[0] = secpSig(signer);
     }

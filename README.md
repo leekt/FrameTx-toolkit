@@ -111,23 +111,35 @@ The consequence that matters for contract authors: **the protocol verifies signa
 your code runs.** Every `SECP256K1`/`P256` entry is checked against either the canonical
 transaction hash (empty `msg`) or its explicit digest before frame execution begins. An
 account no longer runs `ecrecover`; it asks which key signed, requires the canonical-hash
-case when authorizing frames, and applies policy. A complete single-owner account:
+case when authorizing frames, and applies policy. Solidity accounts share the
+`validate(uint256[] signatureIndices)` ABI (selector `0x25b90494`). The array tells the
+account which entries in `tx.signatures` belong to its policy; canonical signatures commit
+to that routing because the VERIFY frame's calldata is part of the transaction hash. The
+core of a single-owner validator is:
 
 ```solidity
-fallback() external {
-    assembly {
-        let signer := sigparam(0, 0x00)                 // who signed, per the protocol
-        let signedThisTx := iszero(sigparam(0, 0x02))   // empty msg => canonical tx hash
-        if and(eq(signer, sload(0)), signedThisTx) {
-            approvetx(0, 0, 3)                          // execution + payment
+function validate(uint256[] calldata signatureIndices) external {
+    bool ownerSigned;
+    for (uint256 i; i < signatureIndices.length; ++i) {
+        uint256 sigIndex = signatureIndices[i];
+        if (FrameTxLib.sigScheme(sigIndex) == FrameTxLib.SCHEME_ARBITRARY) continue;
+        if (FrameTxLib.signedThisTx(sigIndex) && FrameTxLib.sigSigner(sigIndex) == owner) {
+            ownerSigned = true;
+            break;
         }
-        revert(0, 0)
     }
+    if (!ownerSigned) revert();
+
+    uint256 scope = FrameTxLib.frameAllowedScope(FrameTxLib.currentFrameIndex());
+    if (scope == FrameTxLib.SCOPE_NONE) revert();
+    FrameTxLib.approve(scope);
 }
 ```
 
-The standalone Yul account compiles to a 27-byte runtime with this transaction-binding
-check.
+Deriving the current frame's allowed scope lets the same account validate and pay for
+itself (`BOTH`), validate while a paymaster supplies ETH (`EXECUTION`), or pay for another
+already-approved sender (`PAYMENT`). The standalone Yul account implements the same ABI for
+exactly one selected index and treats empty calldata as its ETH-funding path.
 
 ## Contents
 
@@ -189,13 +201,26 @@ To add an account:
 1. Add `contracts/src/accounts/MyAccount.sol`. Inline assembly can use `approvetx`, `txparam`,
    `frameparam`, `sigparam`, and the other toolkit builtins; forge builds it like any other
    source.
-2. Copy `contracts/test/OwnerAccount.t.sol` as a starting point. Its `FrameTest` base provides
-   `deployAccount`, `verifyContext`, `assertApprovesFrame`, and `assertRefusesFrame`.
+2. Inherit [`contracts/test/AccountTestSuite.sol`](contracts/test/AccountTestSuite.sol) and
+   implement `accountUnderTest()` plus `accountAuthorizationSignatures()`. The inherited
+   cases exercise self-payment, external
+   sponsorship, paying for another sender, shifted signature routing, exact scopes, and ETH
+   funding. Add account-specific policy cases alongside them. If the policy trusts keys or
+   proof forms not enumerated by the positive signature hook, override
+   `accountUnauthorizedSignatures()` with entries the policy is guaranteed to reject.
 3. Run the focused test:
 
 ```bash
 ../foundry/target/debug/forge test --match-contract MyAccountTest -vvv
 ```
+
+Paymaster implementations have the parallel
+[`contracts/test/PaymasterTestSuite.sol`](contracts/test/PaymasterTestSuite.sol). Its
+four hooks provide the deployed paymaster, trusted signatures, index-selecting calldata,
+and accepted max cost; inherited cases require sponsorship of every toolkit account family
+using one shared, shifted signature envelope. A paymaster with no signature authorization
+returns an empty signature array; sender-specific setup can override
+`_preparePaymasterForAccount(address)`.
 
 ### Full Anvil transactions
 
@@ -243,7 +268,7 @@ All under [`contracts/src/accounts`](contracts/src/accounts), each with notes in
 
 | Account | Demonstrates |
 |---|---|
-| `account.yul` | A 27-byte owner account bound to the canonical transaction hash, emitted on **stock** solc via `verbatim` |
+| `account.yul` | A minimal owner account with the shared one-index validation ABI, emitted on **stock** solc via `verbatim` |
 | `OwnerAccount.sol` | The canonical starting point |
 | `MultisigAccount.sol` | k-of-n over protocol-verified signatures, with no signature parsing |
 | `SessionKeyAccount.sol` | Cross-frame introspection to constrain a delegated key, with expiry via the expiry verifier frame |

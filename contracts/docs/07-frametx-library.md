@@ -9,12 +9,21 @@ opcodes survive only in the Yul account (02) and in this library's own bodies:
 ```solidity
 import {FrameTxLib} from "../src/frame/FrameTxLib.sol";
 
-function validate() external {
-    if (
-        FrameTxLib.sigSigner(0) != owner          // who provably signed
-            || !FrameTxLib.signedThisTx(0)        // and signed THIS transaction
-    ) revert();
-    FrameTxLib.approve(FrameTxLib.SCOPE_BOTH);    // exits the frame, like RETURN
+function validate(uint256[] calldata signatureIndices) external {
+    bool ownerSigned;
+    for (uint256 i; i < signatureIndices.length; ++i) {
+        uint256 sigIndex = signatureIndices[i];
+        if (FrameTxLib.sigScheme(sigIndex) == FrameTxLib.SCHEME_ARBITRARY) continue;
+        if (FrameTxLib.signedThisTx(sigIndex) && FrameTxLib.sigSigner(sigIndex) == owner) {
+            ownerSigned = true;
+            break;
+        }
+    }
+    if (!ownerSigned) revert();
+
+    uint256 scope = FrameTxLib.frameAllowedScope(FrameTxLib.currentFrameIndex());
+    if (scope == FrameTxLib.SCOPE_NONE) revert();
+    FrameTxLib.approve(scope); // exits the frame, like RETURN
 }
 ```
 
@@ -85,7 +94,7 @@ These opcodes halt exceptionally — burning the frame's gas, not reverting — 
 - `eventDataSlice` when `dataOffset + length` exceeds the event data length.
 
 The library does not guard these — a wrapper that silently swallowed them would hide
-policy bugs — it documents each on the function. Validate indexes you did not choose
+policy bugs — it documents each on the function. Validate indices you did not choose
 yourself with the corresponding count wrapper first.
 
 ## Testing

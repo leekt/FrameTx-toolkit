@@ -18,6 +18,18 @@ object "MinimalAccount" {
 
     object "runtime" {
         code {
+            // Empty calldata is the funding path. Validation uses the shared
+            // `validate(uint256[])` ABI below and therefore never arrives empty.
+            if iszero(calldatasize()) { stop() }
+
+            // validate(uint256[]) with exactly one selected signature index:
+            // selector | offset=0x20 | length=1 | signatureIndex.
+            if iszero(eq(calldatasize(), 0x64)) { revert(0, 0) }
+            if iszero(eq(shr(224, calldataload(0)), 0x25b90494)) { revert(0, 0) }
+            if iszero(eq(calldataload(0x04), 0x20)) { revert(0, 0) }
+            if iszero(eq(calldataload(0x24), 1)) { revert(0, 0) }
+            let signatureIndex := calldataload(0x44)
+
             // --- verbatim argument order --------------------------------------
             // For verbatim_Ni_Mo the FIRST argument is pushed LAST, so it ends up
             // on TOP of the stack. The argument list therefore reads top-first,
@@ -26,7 +38,7 @@ object "MinimalAccount" {
             // code is `6033 6022 6011 aa`.
             //
             // SIGPARAM (0xb4), stack top-first: signatureIndex, param -> value
-            //   signatureIndex = 0  -> the first entry in tx.signatures
+            //   signatureIndex      -> the selected entry in tx.signatures
             //   param          = 0  -> resolved_signer
             //
             // This is the whole point of EIP-8141 account validation: the
@@ -34,12 +46,19 @@ object "MinimalAccount" {
             // envelope against its selected message before this frame runs. The
             // account never calls ecrecover; it asks which key signed, then below
             // requires that the selected message was this transaction's hash.
-            let signer := verbatim_2i_1o(hex"b4", 0, 0x00)
+            let signer := verbatim_2i_1o(hex"b4", signatureIndex, 0x00)
 
             // param = 0x02 -> msg. Zero is the reserved EVM representation for
             // an empty msg, meaning this entry signed the canonical transaction
             // hash. An explicit digest does not bind the frame list.
-            let signedThisTx := iszero(verbatim_2i_1o(hex"b4", 0, 0x02))
+            let signedThisTx := iszero(verbatim_2i_1o(hex"b4", signatureIndex, 0x02))
+
+            // FRAMEPARAM(current frame, 0x06) is flags & 0x3: BOTH for a
+            // self-relay, EXECUTION with a paymaster, or PAYMENT when this
+            // account pays for another sender.
+            let frameIndex := verbatim_1i_1o(hex"b0", 0x0a)
+            let scope := verbatim_2i_1o(hex"b3", frameIndex, 0x06)
+            if iszero(scope) { revert(0, 0) }
 
             // Read-only: this frame runs as a VERIFY frame, i.e. under
             // STATICCALL rules. SLOAD is fine; SSTORE / LOG / state-changing
@@ -47,10 +66,9 @@ object "MinimalAccount" {
             if and(eq(sload(0), signer), signedThisTx) {
                 // APPROVE (0xaa), stack top-first: offset, length, scope
                 //   offset = 0, length = 0 -> empty return data (RETURN semantics)
-                //   scope  = 3             -> APPROVE_EXECUTION_AND_PAYMENT
-                // Requires frame.flags & 0x3 == 0x3 and resolved_target == tx.sender.
+                //   scope  = frame.flags & 0x3
                 // APPROVE exits the frame successfully, so nothing below runs.
-                verbatim_3i_0o(hex"aa", 0, 0, 3)
+                verbatim_3i_0o(hex"aa", 0, 0, scope)
             }
 
             // Wrong signer -> revert -> the WHOLE transaction is invalid.

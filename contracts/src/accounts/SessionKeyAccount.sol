@@ -2,6 +2,7 @@
 pragma solidity ^0.8.30;
 
 import {FrameTxLib} from "../frame/FrameTxLib.sol";
+import {IFrameAccount} from "./IFrameAccount.sol";
 
 /// @title SessionKeyAccount
 /// @author taek <leekt216@gmail.com>
@@ -27,7 +28,7 @@ import {FrameTxLib} from "../frame/FrameTxLib.sol";
 /// and checks that frame's deadline does not outlive the key. The protocol
 /// reverts the whole transaction once `block.timestamp` passes the deadline,
 /// so `deadline <= validUntil` is exactly "this key has not expired".
-contract SessionKeyAccount {
+contract SessionKeyAccount is IFrameAccount {
     // --------------------------------------------------------------- storage
 
     address public owner;
@@ -73,13 +74,14 @@ contract SessionKeyAccount {
 
     /// @notice Target of the transaction's VERIFY frame.
     /// @dev Cannot be `view`: APPROVE mutates the transaction-scoped approval
-    ///      context (and, for PAYMENT, the nonce and balances). Everything
+    ///      context. Execution approval advances the sender nonce; payment
+    ///      approval selects and charges the payer. Everything
     ///      *before* the APPROVE must be read-only regardless, because a VERIFY
     ///      frame executes as a STATICCALL — no SSTORE, no logs, no
     ///      state-changing calls. Only APPROVE is exempt.
     ///      Reverting here makes the whole transaction invalid.
-    function validate() external {
-        (bool ownerSigned, uint64 sessionValidUntil) = _authorize();
+    function validate(uint256[] calldata signatureIndices) external override {
+        (bool ownerSigned, uint64 sessionValidUntil) = _authorize(signatureIndices);
         if (!ownerSigned && sessionValidUntil == 0) revert NoTrustedSignature();
 
         // Owner: unconditional. Session key: the transaction must be
@@ -103,26 +105,30 @@ contract SessionKeyAccount {
         FrameTxLib.approve(scope);
     }
 
-    /// @dev Scans the envelope's signature list for a key this account trusts.
+    /// @dev Scans only the explicitly selected signature entries for a key this account trusts.
     ///      The protocol already checked the cryptography; we only decide whom
     ///      we recognise. The owner wins wherever it appears in the list, so a
     ///      stray session-key entry cannot downgrade an owner-signed
     ///      transaction into the restricted policy. For session keys the
     ///      longest-lived signer wins; any one valid signature suffices.
-    function _authorize() private view returns (bool ownerSigned, uint64 sessionValidUntil) {
-        uint256 n = FrameTxLib.signatureCount();
-        for (uint256 i = 0; i < n; ++i) {
+    function _authorize(uint256[] calldata signatureIndices)
+        private
+        view
+        returns (bool ownerSigned, uint64 sessionValidUntil)
+    {
+        for (uint256 i = 0; i < signatureIndices.length; ++i) {
+            uint256 sigIndex = signatureIndices[i];
             // ARBITRARY entries carry no resolved signer — sigSigner on one is
             // an exceptional halt, so filter by scheme first.
-            if (FrameTxLib.sigScheme(i) == FrameTxLib.SCHEME_ARBITRARY) continue;
+            if (FrameTxLib.sigScheme(sigIndex) == FrameTxLib.SCHEME_ARBITRARY) continue;
 
             // msg == 0 means the signature is over compute_sig_hash(tx), which
             // commits to the entire frame list. An explicit 32-byte msg does
             // not, and must never be accepted as authority to grant EXECUTION
             // (see README, "Why every frame is checked").
-            if (!FrameTxLib.signedThisTx(i)) continue;
+            if (!FrameTxLib.signedThisTx(sigIndex)) continue;
 
-            address s = FrameTxLib.sigSigner(i);
+            address s = FrameTxLib.sigSigner(sigIndex);
             if (s == owner) return (true, sessionValidUntil);
             uint64 validUntil = sessionKeys[s];
             if (validUntil > sessionValidUntil) sessionValidUntil = validUntil;
@@ -168,4 +174,7 @@ contract SessionKeyAccount {
             if (!allowedCall[target][selector]) revert FrameNotAllowed(i);
         }
     }
+
+    /// @dev Accounts that can approve PAYMENT need a normal funding path.
+    receive() external payable {}
 }

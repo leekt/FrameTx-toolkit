@@ -1,147 +1,132 @@
 # 04 — k-of-n multisig account (Solidity)
 
-A 2-of-3 (or k-of-n) multisig smart account in ~40 lines of logic, with **no `ecrecover`, no
-signature blob, and no per-signer offsets**.
+`MultisigAccount` is a k-of-n EIP-8141 account with no `ecrecover`, packed signature blob,
+or `execute()` dispatcher. It implements the common account entry point:
 
-`MultisigAccount.sol` is the whole account. There is no `execute()` function — see
-[Where did `execute()` go?](#where-did-execute-go).
+```solidity
+function validate(uint256[] calldata signatureIndices) external;
+```
+
+The selector is `0x25b90494`. Each element selects an entry in `tx.signatures` for this
+multisig to consider. The contract does not scan unselected envelope entries.
 
 ## What it does
 
-The protocol validates every `SECP256K1` / `P256` entry against its selected message before
-any frame runs. If one is invalid the transaction is invalid and this code never executes.
-The account then counts only entries whose selected message is the canonical transaction
-hash. Its entire job is:
+Before any frame runs, the protocol validates every `SECP256K1` and `P256` entry against its
+selected message. The account then applies policy to the selected indices:
 
-1. `FrameTxLib.signatureCount()` (`TXPARAM 0x0B`) → how many signature entries does this
-   transaction carry?
-2. For each entry `i`:
-   - `FrameTxLib.sigScheme(i)` → `scheme`. Skip anything that is not `SECP256K1`.
-   - `FrameTxLib.signedThisTx(i)` → whether `msg` is `0`, meaning "signed over
-     `compute_sig_hash(tx)`", i.e. over *this* transaction.
-   - `FrameTxLib.sigSigner(i)` → `resolved_signer`. Skip unless it is a stored owner.
-   - Require it to be strictly greater than the previously counted signer (dedup, below).
-3. If the count reaches `threshold`, call `FrameTxLib.approve(...)`.
+1. Require `SECP256K1`; other selected schemes are skipped.
+2. Require an empty `msg`, which means the signer authorized `compute_sig_hash(tx)` and
+   therefore this complete frame transaction.
+3. Require `resolved_signer` to be a stored owner.
+4. Require each counted owner to be strictly greater than the previously counted owner.
+5. After at least `threshold` distinct owners count, approve the current frame's
+   `allowed_scope`.
 
-Order matters in step 2: **read `scheme` before `resolved_signer`**. Requesting
-`resolved_signer` of an `ARBITRARY` entry is an *exceptional halt*, not a revert — it burns
-the frame's gas and, since this is a VERIFY frame, invalidates the whole transaction.
-Skipping foreign entries rather than rejecting them keeps the account composable with a
-paymaster that carries its own signature in the same envelope.
+Reading the scheme before the signer matters. `ARBITRARY` entries do not have a
+`resolved_signer`, and asking for one exceptional-halts. Skipping a selected foreign entry
+keeps mixed authentication schemes composable, while omitting foreign and paymaster entries
+from `signatureIndices` avoids inspecting them at all.
 
-The `msg == 0` check is a security requirement, not a formality. An entry with an explicit
-32-byte digest is a signature an owner produced in some *other* context; the protocol will
-happily validate it. Counting it would let anyone graft an unrelated owner signature onto an
-arbitrary transaction.
+The empty-`msg` check is equally important. A protocol-valid signature over an explicit
+digest does not commit to this sender, nonce, fees, frame list, or index routing and must not
+count toward the threshold.
 
-## Dedup without scratch space
+## Selected-index routing
 
-A VERIFY frame executes as a `STATICCALL`. No `SSTORE`, no `TSTORE`, no logs, no
-state-changing calls — `APPROVE` is the only exception. **The obvious multisig
-implementation, "mark each owner as used in a mapping and clear it at the end", is
-structurally impossible here.** Neither is a transient-storage variant available.
+The transaction builder chooses the entries for this account by ABI-encoding their indices
+in the VERIFY frame. An owner signature may be anywhere in the envelope. Only selected
+entries count, so an unselected owner signature cannot accidentally satisfy the threshold.
 
-Two ways out; this example takes the first:
+The array is signed routing, not an unsigned hint: VERIFY-frame calldata is part of the
+canonical transaction hash. Reordering or replacing the selected indices changes the hash
+and invalidates every canonical owner signature. Out-of-range selected indices fail the
+`SIGPARAM` bounds check.
 
-| Approach | Cost | Requires |
-|---|---|---|
-| **Sorted signers** (used here) | one `uint256` compare per entry, one `SLOAD` per candidate | the wallet building the transaction must place owner entries in ascending address order |
-| Bitmap of owner indices | one memory word, one `SLOAD` per candidate, plus index→owner storage | owners stored as an *indexed array*, and the frame data must carry each signer's index |
+## Dedup without scratch storage
 
-Sorted signers wins on simplicity: dedup collapses to `require(signer > prevSigner)`, owner
-storage stays a plain `mapping(address => bool)`, and no hint data has to be passed in or
-kept consistent. Its cost is an ordering obligation on the transaction builder — and getting
-it wrong is not a soft failure: the `require` reverts the VERIFY frame, which makes the whole
-transaction invalid. The bitmap
-approach removes that obligation but needs an owner-index array that must be maintained
-across owner rotations, and the indices have to be transported somewhere (frame data), which
-is more moving parts for the same guarantee.
+A VERIFY frame is a `STATICCALL`; it cannot use storage or transient storage as a "seen"
+set. This implementation instead requires the *counted selected signers* to appear in
+strictly ascending address order:
 
-An O(k²) "have I seen this signer" scan over a memory list also works and imposes no
-ordering, but it is strictly more code for the same result at realistic k.
+```solidity
+require(signer > prevSigner, "owner sigs not sorted");
+prevSigner = signer;
+```
 
-Note that only *counted* signers must be ascending. Non-owner entries are skipped and do not
-participate in the ordering, so a paymaster's signature can sit anywhere in the list.
+Because the loop follows `signatureIndices`, the required order is the order of those
+indices, not necessarily the physical order of every entry in the envelope. Non-owners and
+other skipped entries do not update `prevSigner`. A builder can therefore leave a shared
+signature envelope in any convenient order and pass an owner-index array ordered by owner
+address.
 
-## Can a relayer tamper with the signature list?
+Other viable designs include a memory bitmap keyed by stable owner numbers or an O(k²)
+memory dedup scan. The sorted-selection rule keeps this example small and requires no extra
+owner-index storage.
 
-No. `compute_sig_hash` elides only the raw `signature` bytes of empty-`msg` entries; each
-entry's `scheme`, `signer` and `msg`, and the entire `frames` list, are committed. Injecting,
-removing or reordering entries changes the hash and invalidates the owners' signatures.
+## One validator, three roles
 
-That also means the owners are signing the *frames*: this account does not need to inspect,
-whitelist or replay-protect the calls being authorised. `nonce` and `chain_id` are in the
-hash too, so there is no separate nonce to manage.
+After reaching threshold, the account approves
+`FRAMEPARAM(TXPARAM(0x0A), 0x06)`—the current frame's `flags & 0x3`—rather than a hardcoded
+scope.
 
-## Frame layout
+| Role | VERIFY target | Flags / scope | Result |
+|---|---|---|---|
+| Validate and pay for itself | multisig, also `tx.sender` | `0x3` (`BOTH`) | Grants execution and pays `max_cost` |
+| Validate with a paymaster | multisig, also `tx.sender` | `0x2` (`EXECUTION`) | Grants execution; a later pay frame pays |
+| Pay for another account | multisig, different from `tx.sender` | `0x1` (`PAYMENT`) | Pays after the sender grants execution |
 
-The transaction must use the `self_verify` prefix (spec §Mempool → Mode Subclassifications).
-`sender` is the account address, and at least `threshold` envelope signature entries must be
-`SECP256K1` owner signatures with empty `msg`, in ascending address order.
+Scope zero cannot approve anything and fails. `APPROVE` also enforces that the scope is a
+subset of the frame flags, that execution approval targets `tx.sender`, and that payment
+approval follows an existing execution approval.
 
-| # | mode | flags | target | data | purpose |
+### Self-funded layout
+
+| # | Mode | Flags | Target | Data | Purpose |
 |---|---|---|---|---|---|
-| 0 | `VERIFY` (1) | `0x3` | account (or `None`) | `0x6901f668` (`validate()`) | counts owner signatures, `APPROVE(0x3)` — approves execution *and* pays the gas |
-| 1 | `SENDER` (2) | `0x0` | whatever the owners want to call | that call's calldata | runs with `caller == ORIGIN == account` |
+| 0 | `VERIFY` | `0x3` | multisig or null | `validate([ownerSigA, ownerSigB, ...])` | Reach threshold, approve execution and payment |
+| 1… | `SENDER` | operation flags | owner-selected target | operation calldata | Execute the signed batch |
 
-Frames 1..n can be any number of `SENDER` / `DEFAULT` frames; `sender_approved` is
-transaction-scoped, so every subsequent `SENDER` frame runs as the account. That is safe
-here precisely because the owners signed the canonical hash, which covers all of them.
+### Externally sponsored layout
 
-With a paymaster instead of self-relay (`only_verify` + `pay` prefix):
+| # | Mode | Flags | Target | Data | Purpose |
+|---|---|---|---|---|---|
+| 0 | `VERIFY` | `0x2` | multisig or null | `validate([ownerSigA, ownerSigB, ...])` | Reach threshold, approve execution only |
+| 1 | `VERIFY` | `0x1` | paymaster | paymaster-specific | Approve payment |
+| 2… | `SENDER` | operation flags | owner-selected target | operation calldata | Execute the signed batch |
 
-| # | mode | flags | target | purpose |
-|---|---|---|---|---|
-| 0 | `VERIFY` (1) | `0x2` | account | same `validate()`, `APPROVE(0x2)` — execution only |
-| 1 | `VERIFY` (1) | `0x1` | paymaster | paymaster approves payment |
-| 2 | `SENDER` (2) | `0x0` | … | the user operation |
+### Paying for another sender
 
-The same deployed bytecode serves both: `validate()` approves whatever the *current* frame's
-flags allow, via `FrameTxLib.frameAllowedScope(FrameTxLib.currentFrameIndex())`
-(`FRAMEPARAM(TXPARAM(0x0A), 0x06)` at the opcode level).
-`APPROVE` reverts on a scope that is not a subset of `flags & 0x3`, so echoing the flags back
-never grants more than the transaction asked for. The one frame where it does not work is a
-frame with `flags & 0x3 == 0`: `APPROVE` also rejects scope `0`, so there `validate()` reverts
-rather than approving nothing — which is correct, since such a frame is not allowed to approve.
+The other sender first approves execution. A later flags-`0x1` VERIFY frame targets this
+funded multisig and calls the same `validate(...)`; threshold owners thereby approve this
+multisig as payer for the exact signed transaction.
 
-Gas budget: the public mempool caps the validation prefix at `MAX_VERIFY_GAS = 100_000`,
-*including* the 2800-per-`SECP256K1` intrinsic signature cost. A 3-of-5 signing burns 8400
-there before frame 0 gets a single unit, so keep frame 0's `gas_limit` and the owner count
-in view of that ceiling.
+This is valid EVM behavior and can be privately included. It is not public-mempool eligible
+with this storage-backed implementation: reading `isOwner` and `threshold` while
+`tx.sender` is a different account violates the generic rule against validation-prefix
+storage reads outside `tx.sender`. Public-pool sponsorship needs a paymaster policy that
+satisfies those rules.
 
 ## Where did `execute()` go?
 
-Nowhere — it was never needed. A `SENDER` frame *is* the execution: the protocol makes the
-call with `caller = tx.sender`, so the account never has to dispatch one itself.
+A `SENDER` frame is the execution. The protocol calls each target with
+`caller = tx.sender`, and the canonical owner signatures cover the complete frame list.
+There is no account-side operation decoder or batch dispatcher.
 
-Concretely, against ERC-4337:
+Compared with ERC-4337, the protocol supplies structured signature entries, performs the
+elliptic-curve verification, binds signatures to the transaction, manages the sender nonce,
+and handles payer collection through `APPROVE`. The contract is left with the wallet policy:
+which selected verified signers are owners, are they distinct, and do enough of them agree?
 
-| ERC-4337 multisig | This account |
-|---|---|
-| `validateUserOp` decodes a packed `bytes signature` blob: k × 65 bytes, offsets, length checks | protocol hands over structured entries; the account reads metadata with two opcodes |
-| k × `ecrecover` in contract code (~3000 gas each plus the parsing around it) | zero EC operations in contract code; the protocol verified them before frame 0 |
-| must reconstruct and hash the `UserOperation` to know what was signed | `msg == 0` *means* "the canonical hash of this transaction" — nothing to reconstruct |
-| `execute()` / `executeBatch()` plus an `onlyEntryPoint` modifier | none; `SENDER` frames are the batch |
-| own nonce management (192-bit key + sequence) | `tx.nonce` is the sender's account nonce and is in the signed hash |
-| EntryPoint contract, deposit/stake accounting, `validationData` time ranges | `APPROVE` scopes; expiry via the protocol's expiry verifier frame |
-| storage-access rules enforced by an off-chain bundler spec | state *writes* blocked by `STATICCALL` in the EVM; read scoping (`SLOAD` only on `tx.sender`) is still a mempool rule |
-
-The 4337 version of this contract is several hundred lines and its bugs live in the blob
-parser. Here there is no blob and no parser.
-
-Malicious-relayer surface also shrinks: 4337 bundlers can reorder or drop `UserOperation`s
-and the account must defend with its own nonce scheme, whereas here the frame list and
-signature metadata are inside the hash the owners signed.
-
-## Storage layout
+## Storage and funding
 
 | Slot | Contents |
 |---|---|
-| 0 | `mapping(address => bool) isOwner` — owner flag at `keccak256(abi.encode(owner, 0))` |
+| 0 | `mapping(address => bool) isOwner`—owner flag at `keccak256(abi.encode(owner, 0))` |
 | 1 | `uint256 threshold` |
 
-The constructor-backed Foundry tests exercise this layout directly. Selectors:
-`validate()` `0x6901f668`, `isOwner(address)` `0x2f54bf6e`, `threshold()` `0x42cde4e8`.
+`receive()` provides a normal funding path because this account can approve `BOTH` or
+`PAYMENT`. At approval time the payer must hold the full `max_cost`.
 
 ## Compiling
 
@@ -150,41 +135,36 @@ cd contracts
 ../foundry/target/debug/forge build
 ```
 
-The current generated runtime is **463 bytes** (926 hex characters) in
-`out/MultisigAccount.sol/MultisigAccount.json` (`deployedBytecode`). It is built with
-`cbor_metadata = false`; all 463 bytes are runtime code and there is no metadata trailer.
+The metadata-free deployed bytecode is written to
+`out/MultisigAccount.sol/MultisigAccount.json`. `FrameTxLib` is internal and inlines into
+the runtime.
 
-Operand order is visible in the output if you want to confirm it: `600b b0` is
-`TXPARAM(0x0B)`; `6001 80 82 b4` is `SIGPARAM` with the index on top and `param = 0x01`
-below; `6006 600a b0 b3` is `FRAMEPARAM(TXPARAM(0x0A), 0x06)`; and the tail `5f 5f aa` is
-`approvetx(0, 0, scope)` with `offset` on top.
+Selectors:
 
-## Verification scope
+| Selector | Function |
+|---|---|
+| `0x25b90494` | `validate(uint256[])` |
+| `0x2f54bf6e` | `isOwner(address)` |
+| `0x42cde4e8` | `threshold()` |
 
-`test/MultisigAccount.t.sol` installs this exact generated runtime and executes its positive
-and negative policy paths against the real opcodes in patched revm. The tests cover threshold
-approval, ordering/dedup, foreign and arbitrary entries, explicit digests, P256 exclusion,
-scope derivation, and `APPROVE_NONE`. Anvil's raw-RPC path is tested separately with simpler
-accounts; this specific multisig has not been submitted over raw RPC.
+## Verification coverage
 
-## Spec points that are unclear or worth flagging
+`test/MultisigAccount.t.sol` inherits
+[`AccountTestSuite`](../test/AccountTestSuite.sol) and executes the account against the real
+frame opcodes in patched revm. The inherited matrix covers shifted routing, all three
+approval roles, exact scopes, and funding. Multisig-specific cases cover threshold
+boundaries, sorted deduplication, selected versus unselected entries, foreign and arbitrary
+entries, explicit digests, and scheme filtering. Raw-RPC frame-transaction behavior is
+tested separately in Anvil.
 
-- **The `0` encoding of an empty `msg` is stated in the wrong section.** The `SIGPARAM` table
-  says only "returns `msg`" and never mentions how an empty `msg` appears on the stack; the
-  encoding is fixed one section earlier, in the signature-object rules: "The explicit 32-byte
-  zero digest is invalid. This reserves the zero stack value as the EVM-visible representation
-  of the transaction signing hash case." That single sentence is what this example's central
-  check rests on, and a reader of the instruction section alone would not find it.
-- **`APPROVE`'s behaviour in a non-`VERIFY` frame is not stated.** The instruction section
-  imposes no mode restriction, so a `DEFAULT`-mode frame with `flags = 0x3` targeting this
-  account appears able to reach `approvetx`. It is harmless — the same threshold of owner
-  signatures over the same canonical hash is still required — but whether it is *intended* is
-  not addressed. This account therefore does not gate `validate()` on mode or `msg.sender`.
-- **Nothing bounds `len(signatures)`.** `MAX_FRAMES` is 64, but the signature list has no
-  stated cap, so the loop bound comes from gas alone. Inside the public mempool
-  `MAX_VERIFY_GAS` covers it; outside it (private relay), a large signature list is simply an
-  expensive transaction the sender pays for.
-- Surprising, though clearly specified: `resolved_signer` on an `ARBITRARY` entry is an
-  *exceptional halt* rather than a revert or a zero return. In a VERIFY frame the difference
-  is fatal — the whole transaction becomes invalid — which makes the scheme check mandatory
-  rather than defensive.
+## Points worth carrying into production
+
+- The length of `signatureIndices` is bounded by validation gas, not by a Solidity-level
+  cap. Add a policy limit if predictable cost matters.
+- Duplicate indices cannot count the same owner twice because the second signer is not
+  strictly greater than the first.
+- A selected `P256` entry is deliberately skipped by this example, even though the protocol
+  verifies it. Supporting P256 multisig owners is a policy change, not a cryptographic
+  implementation task.
+- The contract relies on `APPROVE`'s target and scope checks rather than a separate
+  EntryPoint caller check.

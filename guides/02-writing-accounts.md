@@ -10,18 +10,35 @@ Every `SECP256K1` and `P256` entry is checked before frame execution. An entry w
 `msg` is checked against that explicit digest. Both are protocol-valid. Only the empty-`msg`
 case necessarily commits to this transaction's frame list.
 
-So an account does not do elliptic-curve work. It asks *which key signed*, requires that the
-entry signed this transaction, and then decides whether it trusts that key:
+So an account does not do elliptic-curve work. Solidity accounts in this toolkit share
+`validate(uint256[] signatureIndices)` (selector `0x25b90494`). The VERIFY frame supplies
+the signature entries assigned to that account; it does not force the account to scan the
+entire envelope. Because frame calldata is part of `compute_sig_hash(tx)`, canonical
+signatures commit to this routing along with the rest of the transaction.
+
+The account asks *which selected key signed*, requires that the entry signed this
+transaction, and then decides whether it trusts that key:
 
 ```solidity
-let signer := sigparam(0, 0x00)                 // resolved_signer of entry 0
-let signedThisTx := iszero(sigparam(0, 0x02))   // empty msg => canonical tx hash
-if and(eq(signer, sload(0)), signedThisTx) {
-    approvetx(0, 0, 3)
+function validate(uint256[] calldata signatureIndices) external {
+    bool trusted;
+    for (uint256 i; i < signatureIndices.length; ++i) {
+        uint256 sigIndex = signatureIndices[i];
+        if (FrameTxLib.sigScheme(sigIndex) == FrameTxLib.SCHEME_ARBITRARY) continue;
+        if (FrameTxLib.signedThisTx(sigIndex) && FrameTxLib.sigSigner(sigIndex) == owner) {
+            trusted = true;
+            break;
+        }
+    }
+    if (!trusted) revert();
+
+    uint256 scope = FrameTxLib.frameAllowedScope(FrameTxLib.currentFrameIndex());
+    if (scope == FrameTxLib.SCOPE_NONE) revert();
+    FrameTxLib.approve(scope);
 }
 ```
 
-That is the whole validation path for a single-owner account. Omitting the `0x02` check
+That is the whole policy path for a single-owner account. Omitting the `0x02` check
 would let a valid owner signature over an unrelated explicit digest authorize replaceable
 `SENDER` frames. Compare with ERC-4337, where the account also parses a signature blob and
 runs `ecrecover` itself.
@@ -151,6 +168,21 @@ functions — see
 The requested scope must be a **subset** of the frame's `flags & 0x3`, or `APPROVE` reverts.
 Setting flags to `0x3` and calling `approvetx(0, 0, 1)` is fine; the reverse is not.
 
+A reusable account should normally read `FRAMEPARAM(TXPARAM(0x0A), 0x06)` and approve that
+current `allowed_scope`, rejecting zero. The same validation code can then fill three roles:
+
+| Account role | Frame target | Allowed scope | Result |
+|---|---|---|---|
+| Validate and pay for itself | `tx.sender` | `0x3` (`BOTH`) | Grants execution and supplies ETH |
+| Validate with an external paymaster | `tx.sender` | `0x2` (`EXECUTION`) | Grants execution; a later pay frame supplies ETH |
+| Pay for another account | the payer account, not `tx.sender` | `0x1` (`PAYMENT`) | Supplies ETH after the sender has already approved execution |
+
+The last row is valid EVM behavior and can be privately included. If the payer's validation
+reads its owner, threshold, session keys, or other policy from storage, however, those reads
+are outside `tx.sender` and the transaction is not eligible for the public mempool under the
+generic validation rules. Public-pool sponsorship needs a compatible paymaster policy (for
+example, immutable configuration) rather than an ordinary storage-backed account.
+
 ## Constraints that will bite you
 
 **A VERIFY frame is a STATICCALL.** No `SSTORE`, no `TSTORE`, no logs, no state-changing
@@ -166,6 +198,13 @@ that approves without committing to the full frame list authorises an open-ended
 calls. The accounts in this toolkit require the canonical signature hash, which covers the
 whole frame list. The session-key example additionally walks every frame to impose a narrower
 target/selector/value policy.
+
+**Treat `signatureIndices` as signed routing, not as trusted authentication by itself.**
+Loop only over those selected entries, but still reject out-of-range indices through normal
+failure, filter schemes before requesting a resolved signer, require the canonical-hash
+case, and apply your key policy. An empty array cannot authorize an account. The Solidity
+examples may accept several selected indices; the minimal Yul example deliberately accepts
+exactly one.
 
 **A function calling `approvetx` cannot be `view`.** It changes state: it bumps the sender's
 nonce, sets the payer and collects `max_cost`. Functions using only the introspection
@@ -193,34 +232,68 @@ argument list reads in the same order as the spec's stack table. Verified —
 
 ## Testing an account
 
-Accounts are tested with `forge`, using the patched build. `contracts/test/FrameTest.sol`
-is the base class:
+Accounts are tested with patched Forge against the real opcodes. Inherit
+[`contracts/test/AccountTestSuite.sol`](../contracts/test/AccountTestSuite.sol), deploy and
+initialize the subject in `setUp`, and implement its two hooks:
 
 ```solidity
-contract MyAccountTest is FrameTest {
+contract MyAccountTest is AccountTestSuite {
     address constant ACCOUNT = address(0xACC0);
+    address constant OWNER = address(0x0BEEF);
 
     function setUp() public {
         deployAccount("MyAccount", ACCOUNT);   // etches the compiled runtime
         vm.store(ACCOUNT, bytes32(0), bytes32(uint256(uint160(OWNER))));
     }
 
-    function test_ownerApproves() public {
-        IFrameVm.FrameTx memory ctx = verifyContext(ACCOUNT, SCOPE_BOTH, bytes32(0));
-        ctx.signatures = new IFrameVm.FrameTxSignature[](1);
-        ctx.signatures[0] = secpSig(OWNER); // msgHash == 0: canonical transaction hash
-        assertApproves(ACCOUNT, ctx, "owner should approve");
+    function accountUnderTest() internal pure override returns (address) {
+        return ACCOUNT;
+    }
+
+    function accountAuthorizationSignatures()
+        internal
+        pure
+        override
+        returns (IFrameVm.FrameTxSignature[] memory signatures)
+    {
+        signatures = new IFrameVm.FrameTxSignature[](1);
+        signatures[0] = secpSig(OWNER);
     }
 }
 ```
 
-`vm.setFrameTx` installs the transaction context so the frame opcodes resolve; execution is
-real, not mocked.
+The inherited suite supplies shifted, non-zero signature indices and proves:
+
+- validation and payment for the account itself (`BOTH`);
+- validation while a later paymaster pays (`EXECUTION`);
+- payment for another already-approved sender (`PAYMENT`);
+- exact-scope approval and rejection when no scope is permitted;
+- rejection when valid account signatures exist but are not selected; and
+- an ordinary empty-calldata ETH funding path.
+
+Keep policy-specific positive and negative cases in the concrete test. The suite inherits
+`FrameTest`, whose `vm.setFrameTx` fixture installs transaction context while patched revm
+executes the actual account bytecode and frame opcodes. If the account trusts additional
+keys or proof forms not represented by `accountAuthorizationSignatures()`, override
+`accountUnauthorizedSignatures()` so the routing-negative receives entries that policy is
+guaranteed to reject. Override the `accountSuite*` address hooks as well if the subject uses
+one of the suite's default fixture addresses.
+
+Paymasters have the parallel
+[`contracts/test/PaymasterTestSuite.sol`](../contracts/test/PaymasterTestSuite.sol). A
+concrete paymaster test supplies `_paymasterUnderTest()`, `_paymasterTestSignatures()`,
+`_paymasterTestCall(uint256[])`, and `_paymasterTestMaxCost()`. The inherited matrix uses one
+shared, shifted signature envelope to require sponsorship of the owner, multisig,
+session-key-owner, portable Yul, and builtin Yul accounts, plus refusal of a misrouted
+paymaster index. Non-signature paymasters return an empty signature array, and sender-specific
+policies can override `_preparePaymasterForAccount(address)`.
+Paymasters that reserve a default fixture address can override the `_paymasterSuite*`
+address hooks.
 
 > [!warning] Always include a positive case
 > `assertRefuses` passes if the call fails for *any* reason, including the account never
-> being deployed. A file of only negative assertions is green and worthless. Every test file
-> must contain at least one `assertApproves` proving the setup is genuinely correct.
+> being deployed. The reusable suites provide positive inherited cases; any standalone test
+> must likewise contain at least one successful approval proving its setup is real.
 
 ## Reproducible bytecode
 

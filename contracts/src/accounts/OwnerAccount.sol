@@ -2,66 +2,64 @@
 pragma solidity ^0.8.30;
 
 import {FrameTxLib} from "../frame/FrameTxLib.sol";
+import {IFrameAccount} from "./IFrameAccount.sol";
 
 /// @title  OwnerAccount
 /// @author taek <leekt216@gmail.com>
 /// @notice The canonical single-owner EIP-8141 smart account.
 /// @dev    The account does NOT verify a signature. Before frame 0, the protocol
 ///         verified every SECP256K1 / P256 entry against either the canonical
-///         transaction hash or its explicit digest. The account asks which key
-///         signed and requires the canonical-hash case: "signature 0 must come
-///         from the owner, over this transaction". That policy is the contract.
-contract OwnerAccount {
+///         transaction hash or its explicit digest. Signed VERIFY-frame calldata
+///         selects the signature entries this account should inspect; one of those
+///         entries must come from the owner over this transaction.
+contract OwnerAccount is IFrameAccount {
     /// @dev Slot 0. The key authorised to spend from this account.
     address public owner;
 
     /// @dev setOwner is reachable only through a SENDER frame targeting self.
     error NotSelf();
+    error NoTrustedSignature();
+    error NothingToApprove();
 
     constructor(address initialOwner) {
         owner = initialOwner;
     }
 
     /// @notice VERIFY-frame entry point, called by `ENTRY_POINT` (`address(0xaa)`).
-    ///         Frame data is `abi.encodeWithSelector(OwnerAccount.validate.selector)`
-    ///         i.e. the 4 bytes `0x6901f668`.
+    /// @param signatureIndices Entries in `tx.signatures` selected by the
+    ///        transaction builder for this account's policy.
     /// @dev    Runs as a STATICCALL: no SSTORE, no LOG, no state-changing calls are
     ///         possible here, which is why every check below is a pure read. APPROVE
     ///         is the one instruction allowed to mutate transaction state from a
     ///         VERIFY frame. A revert in a VERIFY frame invalidates the WHOLE
-    ///         transaction (and unrolls any APPROVE), so `revert(0, 0)` is the
-    ///         correct and only rejection path -- there is no "return false".
-    function validate() external {
-        // `sigSigner(0)` is the address the protocol already recovered and
-        // checked -- a verified fact, not a recovery. An ARBITRARY entry has no
-        // resolved signer and halts here, which is a fine outcome: this account
-        // only accepts protocol-verified schemes. Checking the scheme explicitly
-        // is unnecessary -- a P256 entry resolves to keccak256(qx || qy)[12:],
-        // so matching a chosen 20-byte owner with a P256 key is as hard as
-        // matching it with a secp256k1 key.
-        //
-        // `signedThisTx(0)` is `sigMsg(0) == 0`: the entry signed the canonical
-        // transaction signature hash rather than some other digest the owner
-        // signed at some other time, for some other purpose. Accepting a
-        // non-zero `msg` would turn any stray off-chain signature into a blank
-        // cheque; this check is the replay protection.
-        //
-        // A revert in a VERIFY frame invalidates the whole transaction -- there
-        // is no "return false".
-        if (FrameTxLib.sigSigner(0) != owner || !FrameTxLib.signedThisTx(0)) revert();
+    ///         transaction (and unrolls any APPROVE), so a revert is the
+    ///         rejection path -- there is no "return false".
+    function validate(uint256[] calldata signatureIndices) external override {
+        bool ownerSigned;
+        for (uint256 i = 0; i < signatureIndices.length; ++i) {
+            uint256 sigIndex = signatureIndices[i];
 
-        // SCOPE_BOTH: this account both authorises later SENDER frames to act
-        // as it, and agrees to pay the transaction's max_cost. The requested
-        // scope must be a subset of `frame.flags & 0x3`, so the frame MUST
-        // carry flags 0x3; and the protocol only allows flags containing
-        // APPROVE_EXECUTION when the frame target is `tx.sender`. Consequence
-        // worth internalising: this account can never be tricked into paying
-        // for a stranger's transaction, because a frame it does not own cannot
-        // legally carry the flags this call requires.
-        //
-        // APPROVE exits the frame successfully, exactly like RETURN: nothing
-        // after this line executes.
-        FrameTxLib.approve(FrameTxLib.SCOPE_BOTH);
+            // ARBITRARY entries have no resolved signer, so asking SIGPARAM for
+            // one would halt exceptionally. P256 and SECP256K1 both have a
+            // protocol-verified resolved signer and are acceptable here.
+            if (FrameTxLib.sigScheme(sigIndex) == FrameTxLib.SCHEME_ARBITRARY) continue;
+
+            // Zero is the EVM-visible marker for the canonical transaction hash.
+            // An explicit digest does not authorize this frame list.
+            if (!FrameTxLib.signedThisTx(sigIndex)) continue;
+            if (FrameTxLib.sigSigner(sigIndex) == owner) {
+                ownerSigned = true;
+                break;
+            }
+        }
+        if (!ownerSigned) revert NoTrustedSignature();
+
+        // Use the scope named by this frame: BOTH for self relay, EXECUTION when
+        // a paymaster pays, or PAYMENT when this account pays for another sender.
+        // APPROVE enforces the target/sender and subset rules for each case.
+        uint256 scope = FrameTxLib.frameAllowedScope(FrameTxLib.currentFrameIndex());
+        if (scope == FrameTxLib.SCOPE_NONE) revert NothingToApprove();
+        FrameTxLib.approve(scope);
     }
 
     /// @notice Read-only tour of the introspection surface. Not used by `validate`;
@@ -74,7 +72,8 @@ contract OwnerAccount {
     /// @return flags      FRAMEPARAM 0x03 for that frame; `flags & 0x3` is the
     ///                    approval scope APPROVE is allowed to request.
     /// @return mode       FRAMEPARAM 0x02: 0 = DEFAULT, 1 = VERIFY, 2 = SENDER.
-    /// @return signer0    SIGPARAM 0x00, the same value `validate` compares.
+    /// @return signer0    SIGPARAM 0x00 for envelope index zero. Validation may
+    ///                    inspect different indices selected by its calldata.
     function frameContext()
         external
         view

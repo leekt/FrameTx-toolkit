@@ -2,6 +2,7 @@
 pragma solidity ^0.8.30;
 
 import {FrameTxLib} from "../frame/FrameTxLib.sol";
+import {IFrameAccount} from "./IFrameAccount.sol";
 
 /// @title MultisigAccount - a k-of-n multisig smart account for EIP-8141 frame transactions
 /// @author taek <leekt216@gmail.com>
@@ -10,7 +11,7 @@ import {FrameTxLib} from "../frame/FrameTxLib.sol";
 ///         already verified every secp256k1/P256 signature against its selected message.
 ///         This contract admits only entries over the canonical transaction hash, asks
 ///         *which keys signed*, and decides whether it trusts enough of them.
-contract MultisigAccount {
+contract MultisigAccount is IFrameAccount {
     mapping(address => bool) public isOwner;
     uint256 public threshold;
 
@@ -23,8 +24,8 @@ contract MultisigAccount {
         threshold = threshold_;
     }
 
-    /// @notice Entry point of the VERIFY frame. Counts distinct owner signatures in the
-    ///         transaction envelope and approves the transaction once `threshold` is reached.
+    /// @notice Entry point of the VERIFY frame. Counts distinct owner signatures selected by
+    ///         `signatureIndices` and approves the transaction once `threshold` is reached.
     /// @dev Cannot be `view`: APPROVE mutates transaction-scoped state (sender_approved /
     ///      payer) and, for the payment scope, moves max_cost out of this account.
     ///
@@ -39,27 +40,26 @@ contract MultisigAccount {
     ///      resolved_target == tx.sender. Anyone may *build* a frame transaction naming this
     ///      account as sender; without k owner signatures over that transaction's canonical
     ///      signature hash it simply never gets approved.
-    function validate() external {
-        uint256 sigCount = FrameTxLib.signatureCount();
-
+    function validate(uint256[] calldata signatureIndices) external override {
         uint256 approvals = 0;
         uint256 prevSigner = 0; // strictly ascending -> no signer can be counted twice
 
-        for (uint256 i = 0; i < sigCount; ++i) {
+        for (uint256 i = 0; i < signatureIndices.length; ++i) {
+            uint256 sigIndex = signatureIndices[i];
             // Read the scheme BEFORE the signer: asking for resolved_signer of an ARBITRARY
             // entry is an exceptional halt, not a revert, so it would burn the frame's gas
-            // and invalidate the whole transaction. Skipping foreign entries (e.g. a
-            // paymaster's own signature) keeps this account composable.
-            if (FrameTxLib.sigScheme(i) != FrameTxLib.SCHEME_SECP256K1) continue;
+            // and invalidate the whole transaction. Skipping a selected foreign entry
+            // keeps mixed authentication schemes composable.
+            if (FrameTxLib.sigScheme(sigIndex) != FrameTxLib.SCHEME_SECP256K1) continue;
 
-            // `signedThisTx` is `sigMsg(i) == 0`: signed over compute_sig_hash(tx), i.e. over
+            // `signedThisTx` is `sigMsg(sigIndex) == 0`: signed over compute_sig_hash(tx), i.e. over
             // THIS transaction: its chain id, nonce, sender and every frame. A non-zero msg
             // is an explicit digest the owner authorized in some other context; counting it
             // would let anyone replay an unrelated owner signature into an arbitrary
             // transaction.
-            if (!FrameTxLib.signedThisTx(i)) continue;
+            if (!FrameTxLib.signedThisTx(sigIndex)) continue;
 
-            uint256 signer = uint160(FrameTxLib.sigSigner(i));
+            uint256 signer = uint160(FrameTxLib.sigSigner(sigIndex));
             if (!isOwner[address(uint160(signer))]) continue;
 
             // Dedup without scratch space: counted owners must appear in strictly ascending
@@ -76,7 +76,11 @@ contract MultisigAccount {
         // Approve exactly what this frame's flags allow: 0x3 for a self-relaying
         // `self_verify` frame, 0x2 for `only_verify` when a paymaster pays. APPROVE reverts
         // on a scope that is not a subset of the flags, so reading the flags back keeps the
-        // same account usable in both prefixes. It exits the frame like RETURN.
+        // same account usable as a self-payer, sponsored sender, or another sender's
+        // payer. It exits the frame like RETURN.
         FrameTxLib.approve(FrameTxLib.frameAllowedScope(FrameTxLib.currentFrameIndex()));
     }
+
+    /// @dev Accounts that can approve PAYMENT need a normal funding path.
+    receive() external payable {}
 }

@@ -19,15 +19,25 @@ object "MinimalAccount" {
 
     object "runtime" {
         code {
+            if iszero(calldatasize()) { stop() }
+
+            // Shared account ABI: validate(uint256[]) with exactly one index.
+            if iszero(eq(calldatasize(), 0x64)) { revert(0, 0) }
+            if iszero(eq(shr(224, calldataload(0)), 0x25b90494)) { revert(0, 0) }
+            if iszero(eq(calldataload(0x04), 0x20)) { revert(0, 0) }
+            if iszero(eq(calldataload(0x24), 1)) { revert(0, 0) }
+            let signatureIndex := calldataload(0x44)
+
             // sigparam(signatureIndex, param) -- arguments in stack-table order,
             // same convention as verbatim. param 0x00 = resolved_signer.
-            let signer := sigparam(0, 0x00)
+            let signer := sigparam(signatureIndex, 0x00)
             // param 0x02 = msg; zero means the canonical transaction hash.
-            let signedThisTx := iszero(sigparam(0, 0x02))
+            let signedThisTx := iszero(sigparam(signatureIndex, 0x02))
+            let scope := frameparam(txparam(0x0a), 0x06)
+            if iszero(scope) { revert(0, 0) }
 
             if and(eq(sload(0), signer), signedThisTx) {
-                // approvetx(offset, length, scope); scope 3 = EXECUTION | PAYMENT.
-                approvetx(0, 0, 3)
+                approvetx(0, 0, scope)
             }
 
             revert(0, 0)

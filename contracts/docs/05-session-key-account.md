@@ -1,68 +1,73 @@
 # 05 — Session-key account (Solidity, cross-frame introspection)
 
-`SessionKeyAccount.sol` is an EIP-8141 account with two tiers of authority:
+`SessionKeyAccount` has two tiers of authority:
 
-- the **owner** key may do anything;
-- a registered **session key** may only drive calls on an allowlist of
-  `(target, selector)` pairs, only with `value == 0`, and only until the key's
-  `validUntil` timestamp.
+- the owner may authorize any frame transaction; and
+- a registered session key may authorize only zero-value `SENDER` calls on an allowlist of
+  `(target, selector)` pairs, with an expiry no later than the key's `validUntil`.
 
-"Owner may do anything" describes `validate()` policy: any canonical-hash signature by the
-owner bypasses the session-key expiry and call allowlist. It does not mean every admin method
-has a literal `msg.sender == owner` guard; the self-call path is detailed below.
+The account never runs `ecrecover`. The protocol validates every `SECP256K1` and `P256`
+entry before frame execution. The account inspects signer metadata, requires the canonical
+transaction-hash case, and applies its owner or session policy.
 
-The account never runs `ecrecover`. Every `SECP256K1`/`P256` signature in the
-envelope was already verified by the protocol against its selected message before any frame
-executed. The account accepts authority only when that message is the canonical
-`compute_sig_hash(tx)`. Its job is to ask **which key signed** (`SIGPARAM(i, 0x00)`), check
-what it signed (`SIGPARAM(i, 0x02)`), and decide whether it trusts that key.
+## Shared validation ABI and signature routing
 
-The interesting part is what happens for a session key: before approving, the
-VERIFY frame walks the transaction's *entire* frame list with `TXPARAM`/
-`FRAMEPARAM`/`FRAMEDATALOAD` and reverts unless every `SENDER` frame is one this
-key is permitted to make. This is cross-frame introspection, the capability that
-has no equivalent in ERC-4337 or in a plain EOA.
+The contract implements:
 
-## Why every frame is checked
+```solidity
+function validate(uint256[] calldata signatureIndices) external;
+```
 
-From the spec, *Security Considerations → "Execution Approval Authorizes All
-Subsequent Sender Frames"*:
+Its selector is `0x25b90494`. `_authorize` examines only the entries named by
+`signatureIndices`; it does not scan the full signature envelope. This lets an account and
+paymaster share one transaction without relying on fixed envelope positions.
 
-> `sender_approved` is a single transaction-scoped flag. Once a frame grants
-> `APPROVE_EXECUTION` […] every subsequent `SENDER` frame executes with `caller`
-> set to `tx.sender`, not only the frame the approving code inspected.
+Among selected canonical signatures, the owner wins wherever it appears. Otherwise the
+registered session signer with the greatest non-zero `validUntil` supplies the restricted
+authority. An unselected owner signature does not upgrade a selected session-key
+transaction, and an empty selection authorizes nothing.
 
-There is no per-frame approval. Approving execution once authorises *all* later
-`SENDER` frames. So a validator that inspects frame 1 and approves has in fact
-authorised frames 2, 3, … as well. `_checkSenderFrames()` therefore loops over
-`0 .. TXPARAM(0x09) - 1` and applies the policy to every `SENDER` frame, not to
-some subset.
+The index array is itself authenticated. VERIFY-frame calldata is included in the frame
+list covered by `compute_sig_hash(tx)`, so changing the selected entries invalidates the
+canonical signatures. Each selected entry still needs policy checks:
 
-The second half of the same caveat is why `_authorize()` skips any signature
-whose `msg` is non-zero (`SIGPARAM(i, 0x02) != 0`). Only an empty `msg` means
-the signature was checked against `compute_sig_hash(tx)`, which commits to the
-whole frame list; an explicit 32-byte digest commits to nothing about the
-frames, and accepting one as authority to grant `APPROVE_EXECUTION` would let an
-observer replay that approval with a different set of `SENDER` frames.
+- filter `ARBITRARY` before requesting `resolved_signer`;
+- require `msg == 0`, the EVM marker for the canonical transaction hash; and
+- require the resolved signer to be the owner or a registered session key.
 
-`DEFAULT` and `VERIFY` frames are deliberately ignored by the walk: they execute
-with `caller == ENTRY_POINT`, not as this account, so they cannot spend its
-funds or speak in its name. (A `DEFAULT` frame *targeting* this account arrives
-with `msg.sender == ENTRY_POINT`, which the `onlyAdmin` modifier rejects.)
+An out-of-range selected index fails the `SIGPARAM` bounds check. An explicit-digest
+signature may be protocol-valid, but it does not commit to this transaction and is ignored.
 
-## Expiry, without reading the clock
+## Why every SENDER frame is checked
 
-`TIMESTAMP` is banned during validation-prefix execution (spec, *Banned opcodes*),
-so the account cannot compare `block.timestamp` to a key's `validUntil` itself —
-and the spec's security section explains why a naive `block.timestamp` check
-would be a mempool-invalidation grief anyway. The sanctioned mechanism is the
-**expiry verifier frame**: a `VERIFY` frame targeting `EXPIRY_VERIFIER`
-(`address(0x8141)`) whose data is exactly an 8-byte big-endian deadline. The
-protocol admits it only as frame 0 and reverts the whole transaction once
-`block.timestamp > deadline`.
+Signature selection is narrow, but execution inspection must be complete.
+`sender_approved` is one transaction-scoped flag: once execution is approved, every later
+`SENDER` frame runs with `caller = tx.sender`. There is no per-operation approval.
 
-That turns expiry into pure introspection. When the signer is a session key,
-`_checkExpiry` requires:
+For a session key, `_checkSenderFrames()` therefore walks the entire frame list and applies
+the allowlist to every `SENDER` frame. Each must:
+
+- have `value == 0`;
+- have at least four bytes of data; and
+- resolve to an allowed `(target, selector)` pair.
+
+`DEFAULT` and `VERIFY` frames are ignored by this call-policy walk because they do not run
+as `tx.sender`. The canonical session signature commits to the complete frame list, so a
+relayer cannot replace a checked operation after validation routing was signed.
+
+`FRAMEDATALOAD(0, i)` behaves like `CALLDATALOAD`: the selector is left-aligned in the high
+four bytes and short input is zero-padded. Checking `FRAMEPARAM(i, 0x04) >= 4` first prevents
+empty calldata from masquerading as selector `0x00000000`. `FRAMEPARAM(i, 0x00)` returns the
+resolved target, so a null target is correctly treated as `tx.sender`, not address zero.
+
+## Expiry without reading the clock
+
+`TIMESTAMP` is banned in the validation prefix. A session-key transaction instead begins
+with the protocol's expiry verifier at `address(0x8141)`, carrying an eight-byte big-endian
+deadline. The protocol admits that frame only at index zero and rejects the transaction once
+the deadline passes.
+
+The account requires:
 
 ```solidity
 if (!FrameTxLib.isExpiryFrame(0)) revert NoExpiryFrame();
@@ -70,135 +75,102 @@ uint64 deadline = FrameTxLib.expiryDeadline(0);
 if (deadline > validUntil) revert ExpiryBeyondSessionKey(deadline, validUntil);
 ```
 
-The protocol guarantees the transaction dies at `deadline`; the account
-guarantees `deadline <= validUntil`; together, the key cannot act after it
-expires. A session-key transaction with no expiry frame is refused outright —
-it would otherwise be valid forever. Owner-signed transactions carry no such
-requirement: the owner's authority is not time-bounded.
+The protocol guarantees the transaction is dead after `deadline`; the account guarantees
+`deadline <= validUntil`. Owner-authorized transactions do not need an expiry frame because
+the owner authority is not time-bounded.
 
-`sessionKeys[key]` stores the `validUntil` directly (`0` disables the key), so
-registration, expiry, and revocation are one mapping.
+## One validator, three roles
 
-## Frame layout
+After authentication and any session restrictions, `validate` reads the current frame's
+`allowed_scope` and rejects zero. It does not hardcode `BOTH`.
 
-Self-relay layout — the account pays its own gas:
+| Role | VERIFY target | Flags / scope | Result |
+|---|---|---|---|
+| Validate and pay for itself | session account, also `tx.sender` | `0x3` (`BOTH`) | Grants execution and pays `max_cost` |
+| Validate with a paymaster | session account, also `tx.sender` | `0x2` (`EXECUTION`) | Grants execution; a later pay frame pays |
+| Pay for another account | session account, different from `tx.sender` | `0x1` (`PAYMENT`) | Pays after that sender grants execution |
 
-| # | mode         | flags               | target              | value | data                       | purpose |
-|---|--------------|---------------------|---------------------|-------|----------------------------|---------|
-| 0 | `VERIFY` (1) | `0x0`               | `EXPIRY_VERIFIER` (`0x8141`) | 0 | 8-byte deadline   | Protocol-enforced expiry; required by the account for session keys |
-| 1 | `VERIFY` (1) | `0x3` (BOTH)        | `null` or `sender`  | 0     | `0x6901f668` (`validate()`)| Authenticate the signer, check the deadline, walk the SENDER frames, `APPROVE(0x3)` |
-| 2 | `SENDER` (2) | `0x0`               | e.g. token address  | 0     | `transfer(...)`            | The restricted operation |
-| 3 | `SENDER` (2) | `0x0`               | e.g. token address  | 0     | `approve(...)`             | Another one, also checked by frame 1 |
+`APPROVE` enforces the target and scope rules. A PAYMENT-only frame is legal for a target
+different from `tx.sender`, but it must follow the sender's successful execution approval.
 
-For an owner-signed transaction, the expiry frame is omitted. The account's VERIFY frame
-moves to index 0 and the first SENDER frame moves to index 1, the usual `self_verify` prefix.
+If a session key authorizes the payer role, the same expiry and allowlist policy applies to
+the other sender's `SENDER` frames. An owner-selected payer signature bypasses those session
+restrictions, just as it does when this account is the sender.
 
-The account's approval frame (index 1 in the session-key table, index 0 in the owner layout)
-must target `null` or `tx.sender`: the static constraints reject
-`flags & APPROVE_EXECUTION` on any other target, and `APPROVE` itself reverts when
-`resolved_target != tx.sender`. `null` resolves to `tx.sender`, so either encoding works.
+The payer role is valid EVM behavior and can be used through private inclusion. This
+storage-backed implementation is not eligible for the public mempool when it pays for a
+different sender: its reads of `owner`, `sessionKeys`, and `allowedCall` are outside
+`tx.sender`, which violates the generic validation-prefix storage rule. Use a public-pool
+compatible paymaster for public sponsorship.
 
-Sponsored session-key layout — the expiry frame remains first and a paymaster pays:
+## Frame layouts
 
-| # | mode         | flags                | target             | value | data                        | purpose |
-|---|--------------|----------------------|--------------------|-------|-----------------------------|---------|
-| 0 | `VERIFY` (1) | `0x0`                | `EXPIRY_VERIFIER`  | 0     | 8-byte deadline             | Required time bound for the session key |
-| 1 | `VERIFY` (1) | `0x2` (EXECUTION)    | `null` or `sender` | 0     | `0x6901f668` (`validate()`) | Session policy, then `APPROVE(0x2)` |
-| 2 | `VERIFY` (1) | `0x1` (PAYMENT)      | paymaster          | 0     | paymaster-specific          | `APPROVE(0x1)` after execution approval |
-| 3 | `SENDER` (2) | `0x0`                | e.g. token address | 0     | `transfer(...)`             | The restricted operation |
+### Session key, self-funded
 
-For an owner-signed sponsored transaction, omit the expiry frame and renumber the remaining
-three frames to 0, 1, and 2. In both variants the paymaster frame must follow the account's
-execution approval because `APPROVE_PAYMENT` reverts while `sender_approved == false`.
+| # | Mode | Flags | Target | Data | Purpose |
+|---|---|---|---|---|---|
+| 0 | `VERIFY` | `0x0` | expiry verifier (`0x8141`) | 8-byte deadline | Protocol-enforced time bound |
+| 1 | `VERIFY` | `0x3` | account or null | `validate([sessionSigIndex])` | Authenticate, enforce policy, approve execution and payment |
+| 2… | `SENDER` | operation flags | allowlisted target | allowlisted calldata | Restricted operations |
 
-The contract supports both without a flag of its own: it approves
-`FRAMEPARAM(currentFrame, 0x06)`, the frame's own `flags & 0x3`, rather than
-hardcoding `0x3`. Requesting a scope outside `flags & 0x3` reverts, so deriving
-it from the frame is both safe and layout-agnostic; `allowed_scope == 0` is
-rejected explicitly because `APPROVE_NONE` always reverts.
+For an owner-authorized self-funded transaction, omit the expiry frame and place the
+flags-`0x3` account validator at index zero.
 
-Signature entry (either layout):
+### Session key, externally sponsored
 
-| field       | value                                     |
-|-------------|-------------------------------------------|
-| `scheme`    | `0x1` (`SECP256K1`) or `0x2` (`P256`)     |
-| `signer`    | the owner key or a registered session key (20 bytes; empty means `tx.sender`, which is not what you want here) |
-| `msg`       | **empty** — the canonical `compute_sig_hash(tx)` |
-| `signature` | `v‖r‖s` (or `r‖s‖qx‖qy` for P256)         |
+| # | Mode | Flags | Target | Data | Purpose |
+|---|---|---|---|---|---|
+| 0 | `VERIFY` | `0x0` | expiry verifier | 8-byte deadline | Required time bound |
+| 1 | `VERIFY` | `0x2` | account or null | `validate([sessionSigIndex])` | Authenticate, enforce policy, approve execution |
+| 2 | `VERIFY` | `0x1` | paymaster | paymaster-specific | Approve payment |
+| 3… | `SENDER` | operation flags | allowlisted target | allowlisted calldata | Restricted operations |
 
-## Operand order (top of stack first)
+For an owner-authorized sponsored transaction, omit the expiry frame and renumber the
+remaining frames. The paymaster must remain after execution approval.
 
-The account itself reads everything through [`FrameTxLib`](07-frametx-library.md),
-which hides this; the table stays here for anyone dropping to raw assembly. The
-first Yul argument is the **topmost** stack item. Verified against
-`libevmasm/Instruction.cpp` in the patched solc and against
-`revm/crates/interpreter/src/instructions/frame_tx.rs` in patched revm:
+### Paying for another sender
 
-| builtin                          | stack, top first                                  |
-|----------------------------------|---------------------------------------------------|
-| `approvetx(offset, length, scope)` | `offset`, `length`, `scope`                     |
-| `txparam(param)`                 | `param`                                           |
-| `frameparam(frameIndex, param)`  | `frameIndex`, `param`                             |
-| `sigparam(sigIndex, param)`      | `sigIndex`, `param`                               |
-| `framedataload(offset, frameIndex)` | `offset`, `frameIndex`                         |
+The other account first validates with scope `EXECUTION`. A following flags-`0x1` frame
+targets this funded session account and calls `validate([payerSigIndex, ...])`. If a selected
+session key supplies payer authority, place the expiry verifier first and ensure every later
+`SENDER` operation satisfies this account's session policy.
 
-Note the inconsistency, which is easy to get backwards: `FRAMEPARAM` and
-`SIGPARAM` take the **index on top**, while `FRAMEDATALOAD` takes the **offset
-on top** and the frame index underneath — it is `CALLDATALOAD` with an extra
-operand appended below, exactly like `FRAMEDATACOPY`
-(`memOffset, dataOffset, length, frameIndex`).
+## Read-only validation
 
-The APPROVE opcode's builtin is spelled **`approvetx`**, not `approve`; the bare
-name is left free for the ERC-20 method.
+A VERIFY frame runs under `STATICCALL` rules. Authentication, expiry checks, allowlist
+checks, and frame introspection are reads. `APPROVE` is the one transaction-state mutation
+allowed from verification, so `validate` cannot be marked `view`. A revert invalidates the
+whole transaction rather than returning a soft failure.
 
-## Two details worth copying
+All storage reads are on `tx.sender` in the normal self-funded and externally sponsored
+layouts, satisfying that part of the public-mempool policy. The cross-account payer layout
+is the exception described above.
 
-**Selector extraction.** `FRAMEDATALOAD(0, i)` returns the first 32-byte word of
-frame `i`'s data with the selector left-aligned in the high 4 bytes, exactly
-like `calldataload(0)`. So the selector is the word's high 4 bytes:
+## Admin calls and self execution
 
-```solidity
-bytes4 selector = bytes4(FrameTxLib.frameDataLoad(i, 0));
-```
+`setSessionKey` and `setAllowedCall` accept either a direct call from `owner` or a call from
+the account itself. The latter is how an owner-authorized `SENDER` frame targeting the
+account changes policy. A session-key frame also arrives with
+`msg.sender == address(this)`, so do not allowlist either admin selector unless delegating
+policy administration is intentional.
 
-Because the load zero-pads past the end of `data` (CALLDATALOAD semantics), a
-frame with empty data would read as selector `0x00000000`. The code therefore
-requires `FRAMEPARAM(i, 0x04) >= 4` (`len(data)`) before trusting the selector.
+`receive()` provides a funding path for `BOTH` and `PAYMENT` roles. The payer must hold the
+full `max_cost` when approval occurs.
 
-**Resolved target.** `FRAMEPARAM(i, 0x00)` returns the *resolved* target: when a
-frame's `target` is null it resolves to `tx.sender`. That is what an allowlist
-check needs — a raw null target would otherwise look like `address(0)` and slip
-past a naive check while actually calling back into the account itself.
+## Operand order
 
-## Read-only by construction
+`FrameTxLib` wraps the raw opcodes. In Yul, their relevant argument order is:
 
-A `VERIFY` frame executes as a `STATICCALL`; only `APPROVE` may change state.
-Every step before `approvetx` here is a storage read or an introspection opcode,
-so the frame is a legal `STATICCALL`:
+| Builtin | Arguments / stack top first |
+|---|---|
+| `approvetx(offset, length, scope)` | `offset`, `length`, `scope` |
+| `txparam(param)` | `param` |
+| `frameparam(frameIndex, param)` | `frameIndex`, `param` |
+| `sigparam(signatureIndex, param)` | `signatureIndex`, `param` |
+| `framedataload(offset, frameIndex)` | `offset`, `frameIndex` |
 
-- `validate()` cannot be `view`, because `approvetx` updates the
-  transaction-scoped approval context (and, for the PAYMENT scope, increments
-  the nonce and collects `max_cost`);
-- the introspection wrappers are `view`, not `pure` — they read transaction
-  context but touch no state.
-
-A revert anywhere in this frame makes the **whole transaction invalid**, not
-just the frame, which is what makes "revert on a disallowed frame" a real
-policy and not a best-effort one.
-
-All storage this account reads (`owner`, `sessionKeys`, `allowedCall`) lives in
-`tx.sender`'s own storage, so the validation prefix also satisfies the public
-mempool rule "execution reads storage outside `tx.sender`" → rejected.
-
-### Admin calls and the self-call path
-
-`setSessionKey` and `setAllowedCall` use `onlyAdmin`, which accepts either a direct call from
-the owner address or a call whose `msg.sender` is the account itself. The latter is how an
-owner-signed SENDER frame targeting the account performs administration. It is not literally
-owner-only at the function boundary: a session-key transaction would also arrive with
-`msg.sender == address(this)`. The session policy blocks that call unless the owner has
-explicitly allowlisted `(account, setter selector)`. Do not allowlist either admin selector
-for session keys unless granting policy-administration power is intentional.
+The inconsistency worth remembering is that `FRAMEPARAM` and `SIGPARAM` put the index on
+top, while `FRAMEDATALOAD` puts the data offset on top.
 
 ## Compiling
 
@@ -207,78 +179,37 @@ cd contracts
 ../foundry/target/debug/forge build
 ```
 
-Exit code 0; the only compiler noise is the standard "pre-release compiler
-version" warning. The current runtime bytecode lives in
-`out/SessionKeyAccount.sol/SessionKeyAccount.json` (`deployedBytecode`) (1448 bytes,
-`cbor_metadata = false`). `FrameTxLib` leaves no trace in it — everything inlines —
-and you can spot the introspection opcodes: `b0` (`TXPARAM`), `b1`
-(`FRAMEDATALOAD`), `b3` (`FRAMEPARAM`), `b4` (`SIGPARAM`), and `aa` (`APPROVE`)
-in `805f5faa` — `DUP1 PUSH0 PUSH0 APPROVE`, i.e. the scope duplicated from the
-stack, then `offset = 0`, `length = 0` pushed on top of it.
+The metadata-free deployed bytecode is written to
+`out/SessionKeyAccount.sol/SessionKeyAccount.json`. `FrameTxLib` is internal and inlines into
+the runtime.
 
 Selectors:
 
-| selector     | function                             |
-|--------------|--------------------------------------|
-| `0x6901f668` | `validate()`                         |
-| `0x580da310` | `setSessionKey(address,uint64)`      |
-| `0x2b370b67` | `setAllowedCall(address,bytes4,bool)`|
-| `0x8da5cb5b` | `owner()`                            |
-| `0xb7b8d604` | `sessionKeys(address)`               |
-| `0xc2b418ac` | `allowedCall(address,bytes4)`        |
+| Selector | Function |
+|---|---|
+| `0x25b90494` | `validate(uint256[])` |
+| `0x580da310` | `setSessionKey(address,uint64)` |
+| `0x2b370b67` | `setAllowedCall(address,bytes4,bool)` |
+| `0x8da5cb5b` | `owner()` |
+| `0xb7b8d604` | `sessionKeys(address)` |
+| `0xc2b418ac` | `allowedCall(address,bytes4)` |
+
+## Testing
+
+`test/SessionKeyAccount.t.sol` inherits
+[`AccountTestSuite`](../test/AccountTestSuite.sol). Its inherited owner-authorized matrix
+proves shifted routing, self-payment, external sponsorship, payment for another sender,
+exact scopes, and funding. The concrete tests add session-key allowlist, expiry, multi-frame,
+selected-owner precedence, and explicit-digest coverage.
 
 ## Deliberately out of scope
 
-Kept minimal on purpose; each of these is a real requirement for production, and
-none is needed to show cross-frame introspection:
-
-- no gas budget for a session key. `value == 0` on every `SENDER` frame stops a
-  session key from *transferring* ETH, but in the session-key self-relay layout frame 1 has
-  flags `0x3`, so `APPROVE` still collects `max_cost` from the account and a
-  session key can drain it as gas at an arbitrary `max_fee_per_gas`. Capping
-  that means reading `TXPARAM(0x06)` (max cost) or `TXPARAM(0x04)`
-  (`max_fee_per_gas`) in `validate()` when the signer is a session key, or
-  refusing the `APPROVE_PAYMENT` bit outright and requiring a sponsor;
-- no spend limit or call counter (both need `SSTORE`, which a `VERIFY` frame
-  cannot do — they belong in a `SENDER` frame or in an approval-time read-only
-  check against pre-written state; per-key *expiry* needs no `SSTORE` and is
-  implemented above via the expiry frame);
-- no argument-level policy (only `(target, selector)`; `FRAMEDATACOPY` is the
-  tool for inspecting arguments);
-- no ERC-1271, no batching helper, no upgrade path.
-
-## Spec notes and ambiguities
-
-Where the spec is silent, this example makes a choice and says so rather than
-implying the spec mandates it:
-
-1. **`FRAMEDATALOAD` operand order** is stated only in the spec's stack table
-   (`top-0 = offset`, `top-1 = frameIndex`), while `FRAMEPARAM` and `SIGPARAM`
-   state theirs in prose *and* put the index on top. The table is corroborated
-   by the reference implementation (`opFrameDataLoad` pops `offset` first), so
-   this example follows `framedataload(offset, frameIndex)`. Worth flagging
-   because a reader who assumes index-first everywhere gets silently wrong data
-   rather than a halt.
-2. **No ordering or uniqueness rule for `signatures`.** The spec does not say a
-   signature list may not contain several entries usable by the same account.
-   This example scans the whole list and lets the owner win wherever it appears,
-   so a transaction carrying both an owner signature and a session-key signature
-   is treated as owner-authorised. A different account could reasonably require
-   exactly one trusted entry; the spec permits either.
-3. **Nothing binds a `VERIFY` frame to "its" account.** Any frame may call
-   `validate()`; the protections are that `APPROVE` reverts unless
-   `ADDRESS == resolved_target`, and that the static constraints keep
-   `APPROVE_EXECUTION` frames pointed at `tx.sender`. This example relies on
-   those protocol checks instead of adding its own.
-4. **`SIGPARAM(i, 0x00)` on an `ARBITRARY` entry is an exceptional halt**, not a
-   revert — so the scheme must be checked before the signer is read. An
-   exceptional halt in a `VERIFY` frame invalidates the transaction, and unlike
-   a revert it consumes the frame's whole gas allowance.
-5. **`msg == 0` as "canonical signature hash"** is explicit in the spec (the
-   zero digest is reserved for exactly this), so the `SIGPARAM(i, 0x02) != 0`
-   filter is spec-backed, not a heuristic.
-6. **`FRAMEPARAM(i, 0x05)` (`status`) is unusable here** — reading the status of
-   the current or any later frame is an exceptional halt, and a validation frame
-   is by definition ahead of the frames it authorises. There is no way for
-   validation code to react to a later frame's outcome; the atomic-batch flag is
-   the mechanism the spec offers instead.
+- A session key has no gas budget. In the self-funded layout it can spend the account's ETH
+  as gas even though every `SENDER` frame has zero value. A production account should cap
+  `TXPARAM(0x06)` or require external sponsorship for session keys.
+- There is no spend limit or call counter. State changes belong in a `SENDER` frame because
+  VERIFY cannot write storage.
+- The allowlist is selector-level, not argument-level. Use `FRAMEDATACOPY` to enforce
+  argument policy.
+- There is no ERC-1271 support, upgrade path, or batching helper; `SENDER` frames already
+  provide transaction-level batching.

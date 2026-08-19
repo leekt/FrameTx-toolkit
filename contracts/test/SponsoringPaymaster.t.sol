@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {FrameTest, IFrameVm} from "./FrameTest.sol";
+import {IFrameVm} from "./FrameTest.sol";
+import {PaymasterTestSuite} from "./PaymasterTestSuite.sol";
+import {IFrameAccount} from "../src/accounts/IFrameAccount.sol";
 
 /// examples/06-paymaster, executed against the real opcodes.
 ///
@@ -14,7 +16,7 @@ import {FrameTest, IFrameVm} from "./FrameTest.sol";
 /// `maxSponsoredCost` and `owner` are immutables, which `--bin-runtime` emits as
 /// zeroed PUSH32 placeholders, so an etched paymaster would sponsor address(0) at a
 /// cap of zero and no assertion here would mean anything.
-contract SponsoringPaymasterTest is FrameTest {
+contract SponsoringPaymasterTest is PaymasterTestSuite {
     address constant SENDER_ACCOUNT = address(0xACC0);
     address constant SPONSOR = address(0x5B05);
     address constant OTHER_KEY = address(0xBAD);
@@ -27,15 +29,49 @@ contract SponsoringPaymasterTest is FrameTest {
     address paymaster;
 
     function setUp() public {
-        paymaster = deployAccountWithArgs("SponsoringPaymaster", abi.encode(SPONSOR, MAX_SPONSORED_COST));
+        paymaster =
+            deployAccountWithArgs("SponsoringPaymaster", abi.encode(SPONSOR, MAX_SPONSORED_COST));
+        // Keep the non-zero-cost fixture realistically funded. setFrameTx does
+        // not itself test the balance precondition or measure an ETH debit.
         vm.deal(paymaster, 10 ether);
 
-        (bool ok, bytes memory ret) = paymaster.staticcall(abi.encodeWithSignature("sponsorSigner()"));
+        (bool ok, bytes memory ret) =
+            paymaster.staticcall(abi.encodeWithSignature("sponsorSigner()"));
         require(ok, "sponsorSigner() failed");
         assertEq(abi.decode(ret, (address)), SPONSOR, "immutable sponsorSigner not filled in");
         (ok, ret) = paymaster.staticcall(abi.encodeWithSignature("maxSponsoredCost()"));
         require(ok, "maxSponsoredCost() failed");
         assertEq(abi.decode(ret, (uint256)), MAX_SPONSORED_COST, "immutable cap not filled in");
+    }
+
+    // PaymasterTestSuite hooks. Future paymaster tests can implement the same
+    // four hooks to inherit the complete account-policy sponsorship matrix.
+    function _paymasterUnderTest() internal view override returns (address) {
+        return paymaster;
+    }
+
+    function _paymasterTestSignatures()
+        internal
+        pure
+        override
+        returns (IFrameVm.FrameTxSignature[] memory signatures)
+    {
+        signatures = new IFrameVm.FrameTxSignature[](1);
+        signatures[0] = secpSig(SPONSOR);
+    }
+
+    function _paymasterTestCall(uint256[] memory signatureIndices)
+        internal
+        pure
+        override
+        returns (bytes memory)
+    {
+        require(signatureIndices.length == 1, "SponsoringPaymaster selects one signature");
+        return abi.encodeWithSignature("sponsorTransaction(uint256)", signatureIndices[0]);
+    }
+
+    function _paymasterTestMaxCost() internal pure override returns (uint256) {
+        return 0.5 ether;
     }
 
     /// The canonical paymaster prefix: frame 0 is the sender's `only_verify`
@@ -46,6 +82,9 @@ contract SponsoringPaymasterTest is FrameTest {
         view
         returns (IFrameVm.FrameTx memory ctx)
     {
+        uint256[] memory senderSignatureIndices = new uint256[](1);
+        senderSignatureIndices[0] = 0;
+
         IFrameVm.FrameTxFrame[] memory frames = new IFrameVm.FrameTxFrame[](3);
         frames[0] = IFrameVm.FrameTxFrame({
             mode: MODE_VERIFY,
@@ -54,8 +93,9 @@ contract SponsoringPaymasterTest is FrameTest {
             gasLimit: 100_000,
             stateGasLimit: 0,
             value: 0,
-            data: abi.encodeWithSignature("validate()"),
-            // Already ran and approved execution, which is what makes the pay frame legal.
+            data: abi.encodeWithSelector(IFrameAccount.validate.selector, senderSignatureIndices),
+            // Documents the preceding successful execution approval. The synthetic
+            // fixture does not persist sender_approved across separate calls.
             status: 1,
             executionGasUsed: 0,
             stateGasUsed: 0
@@ -136,7 +176,9 @@ contract SponsoringPaymasterTest is FrameTest {
     /// Same transaction, but `sigIndex` points at the sender's entry instead of the
     /// sponsor's. The key is protocol-verified; it is simply not the one we sponsor for.
     function test_wrongSignerRefused() public {
-        assertRefusesFrame(paymaster, _payCtx(0, 0.5 ether, SCOPE_PAYMENT), "only the sponsor key may authorise");
+        assertRefusesFrame(
+            paymaster, _payCtx(0, 0.5 ether, SCOPE_PAYMENT), "only the sponsor key may authorise"
+        );
     }
 
     function test_signerThatIsNotTheSponsorRefused() public {
@@ -177,7 +219,9 @@ contract SponsoringPaymasterTest is FrameTest {
 
     /// An out-of-range index halts on the first SIGPARAM, before the scheme check.
     function test_outOfRangeSigIndexRefused() public {
-        assertRefusesFrame(paymaster, _payCtx(7, 0.5 ether, SCOPE_PAYMENT), "sigIndex past the end of the list");
+        assertRefusesFrame(
+            paymaster, _payCtx(7, 0.5 ether, SCOPE_PAYMENT), "sigIndex past the end of the list"
+        );
     }
 
     /// The paymaster is not `tx.sender`, so a `pay` frame may never carry execution.
@@ -191,6 +235,8 @@ contract SponsoringPaymasterTest is FrameTest {
     }
 
     function test_scopeNoneRefused() public {
-        assertRefusesFrame(paymaster, _payCtx(SPONSOR_SIG, 0.5 ether, SCOPE_NONE), "APPROVE_NONE must revert");
+        assertRefusesFrame(
+            paymaster, _payCtx(SPONSOR_SIG, 0.5 ether, SCOPE_NONE), "APPROVE_NONE must revert"
+        );
     }
 }

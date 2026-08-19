@@ -16,9 +16,11 @@ pragma solidity ^0.8.24;
 ///     be approved?
 ///
 /// (2) is ordinary Solidity. It is where the bugs live, and it is what this
-/// library contains. The frame glue that feeds it -- `sigparam` to learn the
-/// signers, `frameparam` to inspect the frames, `approvetx` to approve -- is a
-/// handful of lines and is exercised against patched revm by the account tests.
+/// library contains. The frame glue that feeds it receives signature indices in
+/// the VERIFY frame's signed calldata, resolves only those selected entries with
+/// `sigparam`, inspects frames with `frameparam`, and approves with `approvetx`.
+/// Signature indices stay in that glue layer; this opcode-free policy receives
+/// the already-selected canonical signers.
 library FrameAccountPolicy {
     /// @notice A session key may only call allowlisted targets, and may not move value.
     struct SessionKey {
@@ -26,33 +28,34 @@ library FrameAccountPolicy {
         bool allowValue; // may the key move ether?
     }
 
-    /// @notice Counts how many of `signers` are distinct members of `owners`.
+    /// @notice Counts how many of `selectedSigners` are distinct members of `owners`.
     /// @dev Duplicate signers are counted once. This matters because an EIP-8141
     /// envelope may carry the same signer in several signature entries, and a
     /// VERIFY frame runs as a STATICCALL, so an account cannot use storage as
     /// scratch space to deduplicate. The O(n*m) scan is intentional: `owners` is
     /// small, and the alternative (requiring sorted input) pushes a correctness
     /// burden onto the caller for no real gain at this size.
-    /// @param signers Resolved signers, as reported by the protocol.
+    /// @param selectedSigners Resolved signers from the signature indices selected by the
+    ///        account's signed VERIFY-frame calldata, after scheme and canonical-hash checks.
     /// @param owners The account's owner set.
-    /// @return count Number of distinct owners represented in `signers`.
-    function countDistinctOwners(address[] memory signers, address[] memory owners)
+    /// @return count Number of distinct owners represented in `selectedSigners`.
+    function countDistinctOwners(address[] memory selectedSigners, address[] memory owners)
         internal
         pure
         returns (uint256 count)
     {
-        for (uint256 i = 0; i < signers.length; i++) {
+        for (uint256 i = 0; i < selectedSigners.length; i++) {
             // Skip a signer already counted earlier in the list.
             bool seen = false;
             for (uint256 j = 0; j < i; j++) {
-                if (signers[j] == signers[i]) {
+                if (selectedSigners[j] == selectedSigners[i]) {
                     seen = true;
                     break;
                 }
             }
             if (seen) continue;
             for (uint256 k = 0; k < owners.length; k++) {
-                if (owners[k] == signers[i]) {
+                if (owners[k] == selectedSigners[i]) {
                     count++;
                     break;
                 }
@@ -63,13 +66,13 @@ library FrameAccountPolicy {
     /// @notice Whether a set of signers satisfies a k-of-n threshold.
     /// @dev A threshold of zero is rejected: it would approve a transaction that
     /// nobody signed.
-    function meetsThreshold(address[] memory signers, address[] memory owners, uint256 threshold)
-        internal
-        pure
-        returns (bool)
-    {
+    function meetsThreshold(
+        address[] memory selectedSigners,
+        address[] memory owners,
+        uint256 threshold
+    ) internal pure returns (bool) {
         if (threshold == 0) return false;
-        return countDistinctOwners(signers, owners) >= threshold;
+        return countDistinctOwners(selectedSigners, owners) >= threshold;
     }
 
     /// @notice Whether a session key may authorise a single call.

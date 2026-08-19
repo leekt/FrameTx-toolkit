@@ -41,13 +41,67 @@ That policy is ordinary Solidity, and it is where the bugs are — threshold
 counting, duplicate signers, session-key expiry, target allowlists, selector
 extraction. `src/policy/FrameAccountPolicy.sol` holds it, and `forge test` covers it
 including fuzz runs; it stays compilable by stock tooling through the `policy` profile.
+Signature indices remain in the frame glue; the opcode-free policy receives only the
+canonical signers resolved from the entries that the signed VERIFY calldata selected.
 
-The frame glue — read the signers with `sigparam`, inspect frames with
-`frameparam`, approve with `approvetx` — is a handful of lines with no branching
-logic. It is exercised against a real EVM by the account tests in `test/`.
+The frame glue reads the selected entries with `sigparam`, inspects frames with
+`frameparam`, and approves with `approvetx`. It is exercised against a real EVM by the
+account tests in `test/`.
+
+All Solidity account examples implement the common
+`IFrameAccount.validate(uint256[] signatureIndices)` entry point (selector
+`0x25b90494`). A VERIFY frame passes the indices assigned to that account instead of making
+every account scan the whole signature envelope. The frame data is covered by every
+canonical transaction signature, so the selected-index routing cannot be changed without
+invalidating those signatures. Each example also derives `allowed_scope` from the current
+frame: `BOTH` when it validates and pays for itself, `EXECUTION` when an external paymaster
+pays, and `PAYMENT` when it acts as the payer for another already-approved sender.
+
+The last role works at the EVM level and through private inclusion, but these examples read
+account policy from storage. When such an account pays for a different `tx.sender`, those
+reads are outside the sender's storage and therefore fail the public-mempool validation
+rule. A public-pool paymaster needs a policy compatible with that rule, such as the
+immutable-backed sponsoring example.
 
 Separating an authorisation policy from its entrypoint is how you would write this anyway;
 the stock-tooling boundary just happens to fall in the same place.
+
+## Reusable conformance suites
+
+New account tests should inherit
+[`AccountTestSuite`](test/AccountTestSuite.sol). Deploy and initialize the subject in
+`setUp()`, then implement only:
+
+```solidity
+function accountUnderTest() internal view returns (address);
+function accountAuthorizationSignatures()
+    internal view
+    returns (IFrameVm.FrameTxSignature[] memory);
+```
+
+The inherited tests shift valid authorization entries away from signature zero and verify
+all three account roles: self-validation plus payment (`BOTH`), validation with a later
+paymaster (`EXECUTION`), and payment for another sender (`PAYMENT`). They also prove that
+unselected valid signatures are ignored, that the exact scope is approved, and that the
+account accepts ordinary ETH funding. The default distractors avoid the signers returned by
+the positive hook; a policy with other trusted keys or proof types overrides
+`accountUnauthorizedSignatures()`. Account-specific policy tests remain in the concrete test
+contract. The three `accountSuite*` address hooks may also be overridden if a subject uses a
+default fixture address.
+
+New paymaster tests should inherit
+[`PaymasterTestSuite`](test/PaymasterTestSuite.sol) and provide the deployed target, its
+trusted protocol signatures, calldata selecting their signature indices, and an accepted
+max-cost fixture through `_paymasterUnderTest()`, `_paymasterTestSignatures()`,
+`_paymasterTestCall(uint256[])`, and `_paymasterTestMaxCost()`. Its shared, shifted signature
+envelope tests that the paymaster sponsors `OwnerAccount`, `MultisigAccount`,
+`SessionKeyAccount`, and both minimal Yul runtimes, while refusing a misrouted paymaster
+index. A paymaster that does not use signature entries returns an empty array; an allowlist
+or proof policy can override `_preparePaymasterForAccount(address)` for per-sender setup.
+The `_paymasterSuite*` address hooks avoid collisions with a paymaster that reserves a
+default fixture address.
+These are opcode-level approval tests; end-to-end ETH charging and refunds still belong in
+transaction-level Anvil tests.
 
 ## Usage
 
