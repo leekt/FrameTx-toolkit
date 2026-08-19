@@ -10,11 +10,13 @@ Every `SECP256K1` and `P256` entry is checked before frame execution. An entry w
 `msg` is checked against that explicit digest. Both are protocol-valid. Only the empty-`msg`
 case necessarily commits to this transaction's frame list.
 
-So an account does not do elliptic-curve work. Solidity accounts in this toolkit share
-`validate(uint256[] signatureIndices)` (selector `0x25b90494`). The VERIFY frame supplies
-the signature entries assigned to that account; it does not force the account to scan the
-entire envelope. Because frame calldata is part of `compute_sig_hash(tx)`, canonical
-signatures commit to this routing along with the rest of the transaction.
+An account using those native schemes does not do elliptic-curve work. An account using an
+`ARBITRARY` entry must verify that entry's witness itself; WebAuthn is the toolkit's concrete
+example. All Solidity accounts share `validate(uint256[] signatureIndices)` (selector
+`0x25b90494`). The VERIFY frame supplies the signature entries assigned to that account; it
+does not force the account to scan the entire envelope. Because frame calldata is part of
+`compute_sig_hash(tx)`, canonical signatures commit to this routing along with the rest of
+the transaction.
 
 The account asks *which selected key signed*, requires that the entry signed this
 transaction, and then decides whether it trusts that key:
@@ -42,6 +44,27 @@ That is the whole policy path for a single-owner account. Omitting the `0x02` ch
 would let a valid owner signature over an unrelated explicit digest authorize replaceable
 `SENDER` frames. Compare with ERC-4337, where the account also parses a signature blob and
 runs `ecrecover` itself.
+
+## Native P256 versus WebAuthn
+
+These are two different signature paths even though both ultimately use the P256 curve:
+
+| | Native P256 | WebAuthn |
+|---|---|---|
+| Transaction scheme | `P256` (`0x02`) | `ARBITRARY` (`0x00`) |
+| Raw entry | `r || s || qx || qy` | Canonical ABI assertion witness |
+| Pre-frame work | Protocol verifies the signature and derives a signer | Protocol only performs structural checks |
+| Contract-visible evidence | Scheme, resolved signer, and whether `msg` is empty | Scheme, `msg`, witness length, and witness bytes |
+| Account check | Trust the selected `keccak256(qx || qy)[12:]` signer | Reconstruct WebAuthn data and call P256VERIFY at `0x100` |
+
+A native P256 entry's raw signature is deliberately opaque to EVM code. Its signer identity
+is `address(uint160(uint256(keccak256(qx || qy))))`, and accounts should still require an
+empty `msg` so the signature covers the canonical frame transaction. A WebAuthn authenticator
+does not sign that hash directly. Put its assertion in an empty-`msg` `ARBITRARY` entry with
+an empty signer field, use the canonical transaction hash as the base64url challenge, and
+verify the witness in the account. The exact 2 KiB-bounded ABI, client-data JSON,
+authenticator flags, constructors, and deliberate omissions are specified in
+[`contracts/docs/09-p256-and-webauthn.md`](../contracts/docs/09-p256-and-webauthn.md).
 
 ## The opcodes
 
@@ -177,11 +200,14 @@ current `allowed_scope`, rejecting zero. The same validation code can then fill 
 | Validate with an external paymaster | `tx.sender` | `0x2` (`EXECUTION`) | Grants execution; a later pay frame supplies ETH |
 | Pay for another account | the payer account, not `tx.sender` | `0x1` (`PAYMENT`) | Supplies ETH after the sender has already approved execution |
 
-The last row is valid EVM behavior and can be privately included. If the payer's validation
-reads its owner, threshold, session keys, or other policy from storage, however, those reads
-are outside `tx.sender` and the transaction is not eligible for the public mempool under the
-generic validation rules. Public-pool sponsorship needs a compatible paymaster policy (for
-example, immutable configuration) rather than an ordinary storage-backed account.
+The last row is valid EVM behavior and can be directly or privately included. If the payer's
+validation reads its owner, threshold, session keys, or other policy from storage, however,
+those reads are outside `tx.sender` and the transaction is not eligible for the public
+mempool under the generic validation rules. This includes `P256Account`, whose rotatable
+signer lives in storage. `WebAuthnAccount` keeps its credential policy in immutable code and
+can avoid that specific third-party-storage read, but a separate coded pay target is still a
+non-canonical paymaster: it remains subject to the draft's one-pending-transaction cap and
+the generic validation and opcode rules.
 
 ## Constraints that will bite you
 
@@ -215,6 +241,15 @@ opcodes cannot be `pure` but can be `view`.
 ```bash
 solidity/build/solc/solc --experimental --evm-version @future --bin-runtime --optimize Account.sol
 ```
+
+The toolkit's Foundry fork executes `@future` as the pre-Amsterdam **Osaka** EVM. This is
+intentional: Osaka activates [EIP-7951](https://eips.ethereum.org/EIPS/eip-7951)'s
+P256VERIFY precompile at `0x100`, while Amsterdam's node-level state-gas behavior is not
+compatible with the current frame profile. A patched Anvil must likewise use
+`--hardfork osaka --enable-frame-transactions` when executing a WebAuthn validator. There is
+not yet an Anvil WebAuthn end-to-end test in this repository. The native-P256 Anvil regression
+does submit a raw type-`0x06` transaction through `P256Account`, including a corrupted-key
+admission negative and mined payer, nonce, and SENDER-effect assertions.
 
 Standalone Yul, which works on **stock** solc too via `verbatim`:
 
@@ -277,18 +312,28 @@ executes the actual account bytecode and frame opcodes. If the account trusts ad
 keys or proof forms not represented by `accountAuthorizationSignatures()`, override
 `accountUnauthorizedSignatures()` so the routing-negative receives entries that policy is
 guaranteed to reject. Override the `accountSuite*` address hooks as well if the subject uses
-one of the suite's default fixture addresses.
+one of the suite's default fixture addresses. An `ARBITRARY` proof whose witness commits to
+the canonical signature hash can also override `accountSuiteSigHash()`; the WebAuthn test
+does so to build its assertion challenge.
 
 Paymasters have the parallel
 [`contracts/test/PaymasterTestSuite.sol`](../contracts/test/PaymasterTestSuite.sol). A
 concrete paymaster test supplies `_paymasterUnderTest()`, `_paymasterTestSignatures()`,
 `_paymasterTestCall(uint256[])`, and `_paymasterTestMaxCost()`. The inherited matrix uses one
-shared, shifted signature envelope to require sponsorship of the owner, multisig,
-session-key-owner, portable Yul, and builtin Yul accounts, plus refusal of a misrouted
-paymaster index. Non-signature paymasters return an empty signature array, and sender-specific
-policies can override `_preparePaymasterForAccount(address)`.
+shared, shifted signature envelope to require sponsorship of all seven targets:
+`OwnerAccount`, `MultisigAccount`, `SessionKeyAccount` through its owner, the portable and
+builtin Yul accounts, `P256Account`, and `WebAuthnAccount`, plus refusal of a misrouted
+paymaster index. The secp256k1, P256, and WebAuthn paymaster tests all inherit this matrix.
+Non-signature paymasters return an empty signature array, and sender-specific policies can
+override `_preparePaymasterForAccount(address)`.
 Paymasters that reserve a default fixture address can override the `_paymasterSuite*`
 address hooks.
+
+These suites execute real bytecode and frame opcodes, but their `setFrameTx` transaction
+context is synthetic. They do not test type-`0x06` admission, nonce changes, or eventual ETH
+debits and refunds. Native P256 cases trust host-supplied, already-verified metadata rather
+than a raw envelope signature. WebAuthn cases create a real P256 assertion and invoke
+precompile `0x100`, but their challenge is the synthetic fixture's signature hash.
 
 > [!warning] Always include a positive case
 > `assertRefuses` passes if the call fails for *any* reason, including the account never

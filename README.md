@@ -48,13 +48,20 @@ The project's default profile sets `evm_version = "@future"`, `experimental = tr
 `solc = "../solidity/build/solc/solc"`, so the patched forge compiles `src/accounts`,
 `src/frame`, and `src/eips` natively and rebuilds them like any other source. Tests etch
 the resulting runtimes (`vm.getDeployedCode`) and drive them through the patched revm via
-the `setFrameTx` cheatcode.
+the `setFrameTx` cheatcode. In this toolkit, `@future` executes as **Osaka**, the last
+pre-Amsterdam Ethereum profile. That activates the [EIP-7951 P256VERIFY
+precompile](https://eips.ethereum.org/EIPS/eip-7951) at `0x100`, which the WebAuthn
+validators need, without enabling Amsterdam's incompatible node-level state-gas rules.
 
 For real signed type-`0x06` envelopes, receipts, and state gas, run the patched node:
 
 ```bash
 foundry/target/debug/anvil --enable-frame-transactions   # plus --enable-eip7819 / --enable-eip7851 / --enable-eip8151 as needed
 ```
+
+That command is sufficient for the existing frame-transaction examples. To execute a
+WebAuthn validator, start Anvil with `--hardfork osaka` as well so precompile `0x100` is
+active. The repository does not yet claim a raw-transaction WebAuthn end-to-end test.
 
 **Coexisting with stock Foundry and solc:**
 
@@ -107,11 +114,15 @@ A frame transaction (type `0x06`) decomposes a transaction into a sequence of **
 contract calls that validate the transaction, approve gas payment, and execute the user's
 operations. Validity and gas payment become programmable.
 
-The consequence that matters for contract authors: **the protocol verifies signatures before
-your code runs.** Every `SECP256K1`/`P256` entry is checked against either the canonical
-transaction hash (empty `msg`) or its explicit digest before frame execution begins. An
-account no longer runs `ecrecover`; it asks which key signed, requires the canonical-hash
-case when authorizing frames, and applies policy. Solidity accounts share the
+The consequence that matters for contract authors: **the protocol verifies native signatures
+before your code runs.** Every `SECP256K1`/`P256` entry is checked against either the
+canonical transaction hash (empty `msg`) or its explicit digest before frame execution
+begins. A native-signature account does not run `ecrecover`; it asks which key signed,
+requires the canonical-hash case when authorizing frames, and applies policy. An
+`ARBITRARY` entry is different: the protocol checks its structure but leaves its witness for
+contract code to inspect with `SIGDATACOPY`. The WebAuthn examples use that path and call
+P256VERIFY themselves because an authenticator signs WebAuthn data, not the raw transaction
+hash. Solidity accounts share the
 `validate(uint256[] signatureIndices)` ABI (selector `0x25b90494`). The array tells the
 account which entries in `tx.signatures` belong to its policy; canonical signatures commit
 to that routing because the VERIFY frame's calldata is part of the transaction hash. The
@@ -175,7 +186,12 @@ This does not execute frame opcodes or model a frame transaction.
 
 This is the recommended account-development loop. It executes the real opcodes in patched
 REVM while the custom `setFrameTx` cheatcode supplies synthetic transaction context. It tests
-account validation and approval behavior, but not type-`0x06` wire encoding or pool admission.
+account validation and approval behavior, but not type-`0x06` wire encoding, pool admission,
+nonce transitions, or eventual ETH charging and refunds. Native P256 fixtures supply
+already-verified scheme/signer/message metadata and therefore do not cryptographically verify
+the envelope signature. WebAuthn fixtures do construct a real assertion and execute
+P256VERIFY, although their canonical transaction challenge still comes from synthetic
+`setFrameTx` context.
 
 Build patched solc and Forge once. The first Foundry build compiles a large Rust dependency
 graph; later builds are incremental.
@@ -217,10 +233,11 @@ To add an account:
 Paymaster implementations have the parallel
 [`contracts/test/PaymasterTestSuite.sol`](contracts/test/PaymasterTestSuite.sol). Its
 four hooks provide the deployed paymaster, trusted signatures, index-selecting calldata,
-and accepted max cost; inherited cases require sponsorship of every toolkit account family
-using one shared, shifted signature envelope. A paymaster with no signature authorization
-returns an empty signature array; sender-specific setup can override
-`_preparePaymasterForAccount(address)`.
+and accepted max cost; inherited cases require sponsorship of all seven account targets:
+`OwnerAccount`, `MultisigAccount`, `SessionKeyAccount` through its owner, the portable and
+builtin Yul accounts, `P256Account`, and `WebAuthnAccount`. Every case uses one shared,
+shifted signature envelope. A paymaster with no signature authorization returns an empty
+signature array; sender-specific setup can override `_preparePaymasterForAccount(address)`.
 
 ### Full Anvil transactions
 
@@ -232,6 +249,12 @@ traces, and replay:
 cargo build --manifest-path foundry/Cargo.toml --locked --bin anvil
 foundry/target/debug/anvil --hardfork prague --enable-frame-transactions
 ```
+
+Use `--hardfork osaka` instead of `prague` when the validation path executes
+`WebAuthnAccount` or `WebAuthnPaymaster`; both call the EIP-7951 precompile at `0x100`.
+The Anvil suite includes a raw native-P256 transaction that rejects a corrupted public key,
+then mines the valid type-`0x06` envelope through `P256Account` and checks its payer, nonce,
+and SENDER-frame effects. There is currently no equivalent Anvil WebAuthn end-to-end test.
 
 Anvil accepts frame transactions only as signed raw bytes through `eth_sendRawTransaction`.
 Object-form `eth_sendTransaction` and `eth_call` do not construct them, and `cast send` does
@@ -261,20 +284,27 @@ features.
 4. **[Foundry and revm](guides/04-foundry.md)** — the patched Forge, Anvil activation and
    support boundaries, receipts, tracing, and replay.
 
-## Accounts
+## Accounts and paymasters
 
 All under [`contracts/src/accounts`](contracts/src/accounts), each with notes in
 [`contracts/docs`](contracts/docs) and tests in [`contracts/test`](contracts/test).
 
-| Account | Demonstrates |
-|---|---|
-| `account.yul` | A minimal owner account with the shared one-index validation ABI, emitted on **stock** solc via `verbatim` |
-| `OwnerAccount.sol` | The canonical starting point |
-| `MultisigAccount.sol` | k-of-n over protocol-verified signatures, with no signature parsing |
-| `SessionKeyAccount.sol` | Cross-frame introspection to constrain a delegated key, with expiry via the expiry verifier frame |
-| `SponsoringPaymaster.sol` | Third-party gas sponsorship |
+| Contract | Kind | Demonstrates |
+|---|---|---|
+| `account.yul` / `account-builtins.yul` | Account | The same minimal one-index owner account, emitted through portable `verbatim` or patched builtins |
+| `OwnerAccount.sol` | Account | The canonical single-owner starting point |
+| `MultisigAccount.sol` | Account | k-of-n over protocol-verified signatures, with no signature parsing |
+| `SessionKeyAccount.sol` | Account | Cross-frame constraints for a delegated key, with expiry via the expiry verifier frame |
+| `P256Account.sol` | Account | Native protocol-verified P256 metadata, `keccak256(qx || qy)[12:]` signer identity, and self-call key rotation |
+| `WebAuthnAccount.sol` | Account | A strict WebAuthn assertion carried as an `ARBITRARY` witness and verified at precompile `0x100` |
+| `SponsoringPaymaster.sol` | Paymaster | Third-party sponsorship authorized by a protocol-verified secp256k1 signer |
+| `P256Paymaster.sol` | Paymaster | Third-party sponsorship authorized by a protocol-verified native P256 signer |
+| `WebAuthnPaymaster.sol` | Paymaster | Third-party sponsorship authorized by a strict WebAuthn assertion |
 
-`contracts/docs/01-eoa-default-code.md` covers the no-contract EOA path.
+[`contracts/docs/09-p256-and-webauthn.md`](contracts/docs/09-p256-and-webauthn.md)
+documents the two P256 paths, their APIs, exact WebAuthn witness profile, public-mempool
+status, and test boundaries. `contracts/docs/01-eoa-default-code.md` covers the no-contract
+EOA path.
 
 ## Two things that will trip you up
 

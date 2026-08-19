@@ -245,6 +245,30 @@ abstract contract FrameTest is Test {
             });
     }
 
+    /// Synthetic P256 entry modeling the normative canonical-hash case.
+    /// `setFrameTx` trusts the resolved signer and does not verify or expose the
+    /// protocol signature bytes; real `r || s || qx || qy` verification belongs
+    /// in an end-to-end frame-transaction test.
+    function p256Sig(address signer) internal pure returns (IFrameVm.FrameTxSignature memory) {
+        return
+            IFrameVm.FrameTxSignature({
+                scheme: 2, signer: signer, msgHash: bytes32(0), signature: ""
+            });
+    }
+
+    /// Synthetic ARBITRARY entry. The host performs no cryptographic validation,
+    /// assigns no resolved signer, and exposes these raw bytes through SIGDATACOPY
+    /// for the account or paymaster policy to interpret.
+    function arbitrarySig(bytes memory signature)
+        internal
+        pure
+        returns (IFrameVm.FrameTxSignature memory)
+    {
+        return IFrameVm.FrameTxSignature({
+            scheme: 0, signer: address(0), msgHash: bytes32(0), signature: signature
+        });
+    }
+
     /// Calls the account as the ENTRY_POINT would for its VERIFY frame.
     function callAccount(address account) internal returns (bool ok) {
         (ok,) = account.call("");

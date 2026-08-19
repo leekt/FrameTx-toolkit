@@ -2,7 +2,10 @@
 
 The toolkit's patched Foundry both compiles and executes frame contracts: the default
 profile drives the patched solc at the experimental `@future` EVM version, so `forge build`
-and `forge test` cover the whole project.
+and `forge test` cover the whole project. The Foundry fork maps `@future` to the
+pre-Amsterdam **Osaka** EVM: this keeps the frame profile away from Amsterdam's incompatible
+node-level state-gas rules while activating the [EIP-7951 P256VERIFY
+precompile](https://eips.ethereum.org/EIPS/eip-7951) at `0x100` for WebAuthn verification.
 
 ## What runs where
 
@@ -32,10 +35,13 @@ data. This is real opcode execution, not a Solidity mock.
 ## The policy/glue split, and why it is good design
 
 EIP-8141 hands the account a much smaller job than ERC-4337 does. Before any frame runs, the
-protocol verifies every protocol signature against either the canonical transaction hash or
-its explicit digest, so the account never touches elliptic curves. What remains is a
-**policy** question: which keys signed the canonical transaction hash, and should those keys
-approve the frames about to execute?
+protocol verifies every `SECP256K1` and native `P256` signature against either the canonical
+transaction hash or its explicit digest, so accounts using those schemes never touch elliptic
+curves. What remains is a **policy** question: which keys signed the canonical transaction
+hash, and should those keys approve the frames about to execute? `ARBITRARY` entries are the
+deliberate exception: their witness is contract-verified. `WebAuthnAccount` uses
+`SIGDATACOPY`, SHA-256, and P256VERIFY because a WebAuthn authenticator signs structured
+WebAuthn data rather than the transaction hash directly.
 
 That policy is ordinary Solidity, and it is where the bugs are — threshold
 counting, duplicate signers, session-key expiry, target allowlists, selector
@@ -57,14 +63,41 @@ invalidating those signatures. Each example also derives `allowed_scope` from th
 frame: `BOTH` when it validates and pays for itself, `EXECUTION` when an external paymaster
 pays, and `PAYMENT` when it acts as the payer for another already-approved sender.
 
-The last role works at the EVM level and through private inclusion, but these examples read
-account policy from storage. When such an account pays for a different `tx.sender`, those
-reads are outside the sender's storage and therefore fail the public-mempool validation
-rule. A public-pool paymaster needs a policy compatible with that rule, such as the
-immutable-backed sponsoring example.
+The last role always works at the EVM level and through direct or private inclusion. Most
+examples, including the rotatable `P256Account`, read policy from storage. When such an
+account pays for a different `tx.sender`, those reads are outside the sender's storage and
+therefore fail the public-mempool validation rule. `WebAuthnAccount` embeds its credential
+configuration in immutable code and can avoid that particular trace violation, but as a
+separate pay target it is still a non-canonical paymaster: the draft's one-pending-transaction
+cap and all generic validation and opcode rules apply.
 
 Separating an authorisation policy from its entrypoint is how you would write this anyway;
 the stock-tooling boundary just happens to fall in the same place.
+
+## Account and paymaster examples
+
+The reusable paymaster matrix treats the two Yul spellings as distinct targets, giving seven
+account implementations in total.
+
+| Account | Authorization path | Mutable validation policy? |
+|---|---|---|
+| `account.yul` | One selected native secp256k1 signer | Owner in storage |
+| `account-builtins.yul` | The same one-index policy through patched builtins | Owner in storage |
+| `OwnerAccount` | Selected native secp256k1 signer | Owner in storage |
+| `MultisigAccount` | Threshold over selected native signers | Owners and threshold in storage |
+| `SessionKeyAccount` | Owner or frame-constrained session key | Policy in storage |
+| `P256Account` | Selected protocol-verified native P256 signer | Rotatable signer in storage |
+| `WebAuthnAccount` | One selected, contract-verified `ARBITRARY` assertion | Immutable credential configuration |
+
+| Paymaster | Authorization path | Public-pool classification |
+|---|---|---|
+| `SponsoringPaymaster` | Native secp256k1 sponsor signer | Non-canonical |
+| `P256Paymaster` | Native P256 sponsor signer | Non-canonical |
+| `WebAuthnPaymaster` | Strict WebAuthn assertion | Non-canonical |
+
+The P256 and WebAuthn constructors, transaction entries, exact WebAuthn witness format, and
+security boundaries are documented in
+[`docs/09-p256-and-webauthn.md`](docs/09-p256-and-webauthn.md).
 
 ## Reusable conformance suites
 
@@ -95,13 +128,20 @@ trusted protocol signatures, calldata selecting their signature indices, and an 
 max-cost fixture through `_paymasterUnderTest()`, `_paymasterTestSignatures()`,
 `_paymasterTestCall(uint256[])`, and `_paymasterTestMaxCost()`. Its shared, shifted signature
 envelope tests that the paymaster sponsors `OwnerAccount`, `MultisigAccount`,
-`SessionKeyAccount`, and both minimal Yul runtimes, while refusing a misrouted paymaster
-index. A paymaster that does not use signature entries returns an empty array; an allowlist
-or proof policy can override `_preparePaymasterForAccount(address)` for per-sender setup.
+`SessionKeyAccount` through its owner, both minimal Yul runtimes, `P256Account`, and
+`WebAuthnAccount`, while refusing a misrouted paymaster index. `SponsoringPaymasterTest`,
+`P256PaymasterTest`, and `WebAuthnPaymasterTest` all inherit this seven-account matrix. A
+paymaster that does not use signature entries returns an empty array; an allowlist or proof
+policy can override `_preparePaymasterForAccount(address)` for per-sender setup.
 The `_paymasterSuite*` address hooks avoid collisions with a paymaster that reserves a
 default fixture address.
-These are opcode-level approval tests; end-to-end ETH charging and refunds still belong in
-transaction-level Anvil tests.
+These are opcode-level approval tests under synthetic `setFrameTx` context; they do not prove
+wire admission, nonce transitions, or eventual ETH charging and refunds. Native P256 entries
+are already-verified metadata fixtures. WebAuthn tests execute a real P256 assertion through
+precompile `0x100`, but the assertion challenge is still a synthetic transaction hash. No
+Anvil WebAuthn end-to-end test is claimed. The separate Anvil integration suite does submit a
+raw native-P256 type-`0x06` envelope through `P256Account`, including a corrupted-key admission
+negative and payer, nonce, and SENDER-effect assertions.
 
 ## Usage
 

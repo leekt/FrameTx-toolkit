@@ -41,9 +41,16 @@ abstract contract AccountTestSuite is FrameTest {
         return DEFAULT_CALL_TARGET;
     }
 
-    /// Canonical-hash signatures which satisfy this account's policy. Returning
-    /// full entries keeps the suite reusable by P256 and future policy types as
-    /// well as today's SECP256K1 owner accounts.
+    /// Synthetic canonical signature hash shared by every context in this
+    /// suite. Scheme-specific fixtures such as WebAuthn assertions may override
+    /// or consume it when constructing their authorization bytes.
+    function accountSuiteSigHash() internal view virtual returns (bytes32) {
+        return bytes32(uint256(0x8141));
+    }
+
+    /// Signature entries which satisfy this account's policy. Returning full
+    /// entries keeps the suite reusable across native protocol schemes and
+    /// contract-verified ARBITRARY witnesses such as WebAuthn assertions.
     function accountAuthorizationSignatures()
         internal
         view
@@ -208,7 +215,7 @@ abstract contract AccountTestSuite is FrameTest {
         returns (IFrameVm.FrameTx memory ctx)
     {
         address account = accountUnderTest();
-        ctx = verifyContext(account, SCOPE_BOTH, bytes32(uint256(0x8141)));
+        ctx = verifyContext(account, SCOPE_BOTH, accountSuiteSigHash());
         ctx.frames = new IFrameVm.FrameTxFrame[](2);
         ctx.frames[0] = verifyFrame(account, SCOPE_BOTH, validationCalldata(signatureIndices), 0);
         ctx.frames[1] = senderFrame();
@@ -223,7 +230,7 @@ abstract contract AccountTestSuite is FrameTest {
         returns (IFrameVm.FrameTx memory ctx)
     {
         address account = accountUnderTest();
-        ctx = verifyContext(account, SCOPE_EXECUTION, bytes32(uint256(0x8141)));
+        ctx = verifyContext(account, SCOPE_EXECUTION, accountSuiteSigHash());
         ctx.frames = new IFrameVm.FrameTxFrame[](3);
         ctx.frames[0] =
             verifyFrame(account, SCOPE_EXECUTION, validationCalldata(signatureIndices), 0);
@@ -248,7 +255,7 @@ abstract contract AccountTestSuite is FrameTest {
         returns (IFrameVm.FrameTx memory ctx)
     {
         address account = accountUnderTest();
-        ctx = verifyContext(account, SCOPE_PAYMENT, bytes32(uint256(0x8141)));
+        ctx = verifyContext(account, SCOPE_PAYMENT, accountSuiteSigHash());
         address otherSender = accountSuiteOtherSender();
         ctx.sender = otherSender;
         ctx.frameIndex = 1;
