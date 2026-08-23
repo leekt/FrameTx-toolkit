@@ -14,6 +14,10 @@ boundaries:
 The native path is the simpler policy primitive. WebAuthn needs the `ARBITRARY` path because
 an authenticator signs `authenticatorData || SHA-256(clientDataJSON)`, not the EIP-8141
 transaction hash directly. Its client-data challenge carries that transaction hash instead.
+The toolkit-local ML-DSA-44 scheme `0x03` does not widen either path:
+`P256Account`/`P256Paymaster` still require exactly scheme `0x02`, while
+`WebAuthnAccount`/`WebAuthnPaymaster` still require exactly their scheme-`0x00` assertion
+profile. The separate post-quantum profile is documented in [`10-pq.md`](10-pq.md).
 See the local [EIP-8141 implementation profile](../../spec/EIP8141.md) and the primary
 [EIP-8141](https://eips.ethereum.org/EIPS/eip-8141),
 [EIP-7951](https://eips.ethereum.org/EIPS/eip-7951), and
@@ -43,7 +47,7 @@ but it does not authorize the replaceable frame list and these accounts reject i
 | API | Behavior |
 |---|---|
 | `constructor(bytes32 qx, bytes32 qy)` | Rejects the all-zero pair and stores only the derived signer address |
-| `validate(uint256[] signatureIndices)` | Scans only the selected entries for a canonical native P256 signature from the stored signer, then approves the current allowed scope |
+| `validate(uint256 signatureIndex)` | Requires the selected entry to be a canonical native P256 signature from the stored signer, then approves the current allowed scope |
 | `setP256Key(bytes32 qx, bytes32 qy)` | Rotates the signer; callable only when `msg.sender == address(this)`, as in a SENDER self-call |
 | `p256Signer()` | Returns the current stored signer identity |
 | `signerForKey(bytes32 qx, bytes32 qy)` | Returns the toolkit's `keccak256(qx || qy)[12:]` identity |
@@ -62,7 +66,7 @@ a key carried by an actual native P256 signature is a valid curve point. Because
 | API | Behavior |
 |---|---|
 | `constructor(bytes32 sponsorQx, bytes32 sponsorQy, uint256 maxSponsoredCost)` | Derives the immutable sponsor identity, records the deployment caller as owner, and can receive initial ETH |
-| `sponsorTransaction(uint256[] signatureIndices)` | Finds a selected canonical native P256 entry from the sponsor, enforces the cost cap and exact `PAYMENT` scope, then approves payment |
+| `sponsorTransaction(uint256 signatureIndex)` | Requires the selected entry to be a canonical native P256 signature from the sponsor, enforces the cost cap and exact `PAYMENT` scope, then approves payment |
 | `withdraw(address payable to, uint256 amount)` | Owner-only withdrawal |
 | `receive()` | Accepts sponsorship funding |
 
@@ -72,8 +76,8 @@ the non-canonical paymaster rules apply.
 ## WebAuthn transaction entry
 
 Both [`WebAuthnAccount.sol`](../src/accounts/WebAuthnAccount.sol) and
-[`WebAuthnPaymaster.sol`](../src/accounts/WebAuthnPaymaster.sol) require exactly one selected
-signature index. That entry must be:
+[`WebAuthnPaymaster.sol`](../src/accounts/WebAuthnPaymaster.sol) receive one selected
+signature index directly. That entry must be:
 
 | Entry field | Required value |
 |---|---|
@@ -229,7 +233,7 @@ execution.
 | API | Behavior |
 |---|---|
 | `constructor(bytes32 qx, bytes32 qy, bytes32 rpIdHash, bytes32 originHash, bool requireUserVerification)` | Stores all credential policy as immutables; rejects an all-zero key pair or a zero RP/origin hash |
-| `validate(uint256[] signatureIndices)` | Requires one selected empty-`msg` `ARBITRARY` witness, verifies it against the canonical transaction hash, then approves the current non-zero allowed scope |
+| `validate(uint256 signatureIndex)` | Requires the selected empty-`msg` `ARBITRARY` witness, verifies it against the canonical transaction hash, then approves the current non-zero allowed scope |
 | Public immutable getters | Return `publicKeyX`, `publicKeyY`, `rpIdHash`, `originHash`, and `requireUserVerification` |
 | `receive()` | Accepts ETH for self-payment or payment on behalf of another sender |
 
@@ -241,7 +245,7 @@ or UV policy.
 | API | Behavior |
 |---|---|
 | `constructor(bytes32 qx, bytes32 qy, bytes32 rpIdHash, bytes32 originHash, bool requireUserVerification, uint256 maxSponsoredCost)` | Stores credential policy and cost cap as immutables, records the deployment caller as owner, and can receive initial ETH |
-| `sponsorTransaction(uint256[] signatureIndices)` | Requires one valid assertion, enforces the cost cap and exact `PAYMENT` scope, then approves payment |
+| `sponsorTransaction(uint256 signatureIndex)` | Requires the selected assertion to be valid, enforces the cost cap and exact `PAYMENT` scope, then approves payment |
 | Public immutable getters | Return owner, credential policy, and maximum sponsored cost |
 | `withdraw(address payable to, uint256 amount)` | Owner-only withdrawal |
 | `receive()` | Accepts sponsorship funding |
@@ -263,7 +267,8 @@ The last WebAuthn cell is not a blanket public-mempool guarantee. When an accoun
 is used as a separate pay target, it is a non-canonical paymaster. Under the current draft it
 is subject to the one-pending-transaction limit for that payer and to every generic
 validation trace, opcode, gas, balance-reservation, and structural rule. The dedicated
-`P256Paymaster` and `WebAuthnPaymaster` have the same non-canonical classification.
+`P256Paymaster` and `WebAuthnPaymaster` have the same non-canonical classification, as does
+the separate experimental `MLDSAPaymaster`.
 
 `P256Account` is stricter: its pay-other validation reads `p256Signer` from storage outside
 the different `tx.sender`, which violates the public-pool trace rule. That role is still valid
@@ -275,9 +280,10 @@ for direct execution or private inclusion.
 checks the three roles above, shifted selected indices, unselected-proof rejection, exact
 scope behavior, invalid selections, and ordinary ETH funding.
 
-[`PaymasterTestSuite.sol`](../test/PaymasterTestSuite.sol) is inherited by all three example
-paymaster tests: `SponsoringPaymasterTest`, `P256PaymasterTest`, and
-`WebAuthnPaymasterTest`. Each paymaster must sponsor the same seven-account matrix from a
+[`PaymasterTestSuite.sol`](../test/PaymasterTestSuite.sol) is inherited by all four example
+paymaster tests: `SponsoringPaymasterTest`, `P256PaymasterTest`,
+`WebAuthnPaymasterTest`, and `MLDSAPaymasterTest`. Each paymaster must sponsor the same
+eight-account matrix from a
 shared signature envelope:
 
 1. `OwnerAccount`
@@ -287,9 +293,10 @@ shared signature envelope:
 5. Patched-builtin Yul account
 6. `P256Account`
 7. `WebAuthnAccount`
+8. `MLDSAAccount`
 
-The matrix appends each paymaster's authorization entries after the account-specific prefix,
-computes the shifted paymaster indices dynamically, and includes a wrong-selected-index
+The matrix appends the paymaster's single authorization entry after the account-specific
+prefix, computes its shifted scalar index dynamically, and includes a wrong-selected-index
 negative.
 
 ### What the Forge tests do not prove
@@ -301,6 +308,9 @@ Consequently:
 - native P256 tests supply already-verified `scheme`, `signer`, and `msg` metadata with no
   raw protocol signature, so they test account/paymaster routing and policy rather than
   protocol P256 cryptography;
+- native ML-DSA contract tests have the same metadata-only boundary; real ML-DSA-44
+  cryptography and canonical 3,732-byte decoding are covered in the Rust transaction tests,
+  not by `setFrameTx`;
 - WebAuthn tests use `vm.signP256` to create a real assertion and exercise P256VERIFY at
   `0x100`, but the challenge is a synthetic fixture hash rather than a hash decoded from a
   raw type-`0x06` transaction;
@@ -310,8 +320,9 @@ Consequently:
 
 The separate Anvil integration suite closes that boundary for native P256: it submits a raw
 type-`0x06` envelope through the production `P256Account` runtime, rejects a corrupted public
-key at admission, and checks the mined payer, nonce, and SENDER-frame effect. There is no
-claimed Anvil WebAuthn end-to-end test.
+key at admission, and checks the mined payer, nonce, and SENDER-frame effect. The separate
+ML-DSA profile likewise has a raw production-account test; WebAuthn remains the path without
+a claimed Anvil end-to-end test.
 
 ## Runtime profile
 

@@ -3,42 +3,40 @@ pragma solidity ^0.8.24;
 
 import {IFrameVm} from "./FrameTest.sol";
 import {PaymasterTestSuite} from "./PaymasterTestSuite.sol";
-import {P256Paymaster} from "../src/accounts/P256Paymaster.sol";
+import {MLDSAPaymaster} from "../src/accounts/MLDSAPaymaster.sol";
+import {MLDSA44} from "../src/crypto/MLDSA44.sol";
 
-/// P256 paymaster policy tests. Inheriting PaymasterTestSuite proves that this
-/// paymaster sponsors every account implementation in the toolkit.
-contract P256PaymasterTest is PaymasterTestSuite {
+contract RejectMLDSAWithdrawal {
+    receive() external payable {
+        revert();
+    }
+}
+
+/// Native ML-DSA-44 paymaster policy tests. Inheriting PaymasterTestSuite
+/// proves sponsorship across every account implementation in its matrix.
+contract MLDSAPaymasterTest is PaymasterTestSuite {
     uint8 private constant SCHEME_SECP256K1 = 1;
     uint8 private constant SCHEME_P256 = 2;
     uint8 private constant SCHEME_ML_DSA_44 = 3;
-    uint256 private constant P256_KEY =
-        0x4567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef123;
-    uint256 private constant OTHER_P256_KEY =
-        0x567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234;
     uint256 private constant MAX_SPONSORED_COST = 1 ether;
-    address private constant SENDER_ACCOUNT = address(0xACC0);
+    address private constant SENDER_ACCOUNT = address(0xA44);
 
     address internal paymaster;
     address internal sponsorSigner;
+    bytes internal sponsorPublicKey;
 
     function setUp() public {
-        (uint256 qx, uint256 qy) = vm.publicKeyP256(P256_KEY);
-        sponsorSigner = _signer(bytes32(qx), bytes32(qy));
+        sponsorPublicKey = _publicKey(0xc3);
+        sponsorSigner = _signer(sponsorPublicKey);
         paymaster = deployAccountWithArgs(
-            "P256Paymaster", abi.encode(bytes32(qx), bytes32(qy), MAX_SPONSORED_COST)
+            "MLDSAPaymaster", abi.encode(sponsorPublicKey, MAX_SPONSORED_COST)
         );
         vm.deal(paymaster, 10 ether);
 
-        assertEq(
-            P256Paymaster(payable(paymaster)).sponsorSigner(),
-            sponsorSigner,
-            "constructor key identity"
-        );
-        assertEq(
-            P256Paymaster(payable(paymaster)).maxSponsoredCost(),
-            MAX_SPONSORED_COST,
-            "constructor cost cap"
-        );
+        MLDSAPaymaster subject = MLDSAPaymaster(payable(paymaster));
+        assertEq(subject.owner(), address(this), "immutable owner");
+        assertEq(subject.sponsorSigner(), sponsorSigner, "constructor key identity");
+        assertEq(subject.maxSponsoredCost(), MAX_SPONSORED_COST, "constructor cost cap");
     }
 
     function _paymasterUnderTest() internal view override returns (address) {
@@ -51,7 +49,7 @@ contract P256PaymasterTest is PaymasterTestSuite {
         override
         returns (IFrameVm.FrameTxSignature memory signature)
     {
-        signature = _signature(SCHEME_P256, sponsorSigner, bytes32(0));
+        signature = _signature(SCHEME_ML_DSA_44, sponsorSigner, bytes32(0));
     }
 
     function _paymasterTestCall(uint256 signatureIndex)
@@ -60,15 +58,23 @@ contract P256PaymasterTest is PaymasterTestSuite {
         override
         returns (bytes memory)
     {
-        return abi.encodeWithSelector(P256Paymaster.sponsorTransaction.selector, signatureIndex);
+        return abi.encodeWithSelector(MLDSAPaymaster.sponsorTransaction.selector, signatureIndex);
     }
 
     function _paymasterTestMaxCost() internal pure override returns (uint256) {
         return 0.5 ether;
     }
 
-    function _signer(bytes32 x, bytes32 y) internal pure returns (address) {
-        return address(uint160(uint256(keccak256(abi.encodePacked(x, y)))));
+    function _publicKey(uint256 seed) internal pure returns (bytes memory key) {
+        key = new bytes(1_312);
+        for (uint256 i; i < key.length; ++i) {
+            key[i] = bytes1(uint8((seed + i) & 0xff));
+        }
+    }
+
+    function _signer(bytes memory key) internal pure returns (address) {
+        require(key.length == 1_312, "test key length");
+        return address(uint160(uint256(keccak256(abi.encodePacked(bytes1(0x03), key)))));
     }
 
     function _signature(uint8 scheme, address claimedSigner, bytes32 msgHash)
@@ -99,8 +105,6 @@ contract P256PaymasterTest is PaymasterTestSuite {
             stateGasLimit: 0,
             value: 0,
             data: "",
-            // Documents the preceding successful execution approval; the
-            // synthetic fixture does not persist it between calls.
             status: 1,
             executionGasUsed: 0,
             stateGasUsed: 0
@@ -112,7 +116,9 @@ contract P256PaymasterTest is PaymasterTestSuite {
             gasLimit: 200_000,
             stateGasLimit: 0,
             value: 0,
-            data: abi.encodeWithSelector(P256Paymaster.sponsorTransaction.selector, signatureIndex),
+            data: abi.encodeWithSelector(
+                MLDSAPaymaster.sponsorTransaction.selector, signatureIndex
+            ),
             status: 0,
             executionGasUsed: 0,
             stateGasUsed: 0
@@ -131,6 +137,14 @@ contract P256PaymasterTest is PaymasterTestSuite {
         signatures[0] = _signature(scheme, claimedSigner, msgHash);
     }
 
+    function test_signerUsesSchemeDomainSeparatedPublicKeyDerivation() public view {
+        assertEq(
+            MLDSAPaymaster(payable(paymaster)).signerForKey(sponsorPublicKey),
+            sponsorSigner,
+            "signer must be low20(keccak256(0x03 || publicKey))"
+        );
+    }
+
     function test_secp256k1SponsorEntryIsRefused() public {
         assertRefusesFrame(
             paymaster,
@@ -140,30 +154,32 @@ contract P256PaymasterTest is PaymasterTestSuite {
                 0.5 ether,
                 SCOPE_PAYMENT
             ),
-            "the paymaster must require the P256 protocol scheme"
+            "the paymaster must require native ML-DSA-44"
         );
     }
 
-    function test_mldsaSponsorEntryIsRefused() public {
+    function test_p256SponsorEntryIsRefused() public {
         assertRefusesFrame(
             paymaster,
             _payContext(
-                _singleSignature(SCHEME_ML_DSA_44, sponsorSigner, bytes32(0)),
+                _singleSignature(SCHEME_P256, sponsorSigner, bytes32(0)),
                 0,
                 0.5 ether,
                 SCOPE_PAYMENT
             ),
-            "an ML-DSA-44 identity must not masquerade as the configured P256 sponsor"
+            "P256 must not masquerade as ML-DSA-44"
         );
     }
 
-    function test_differentP256SponsorIsRefused() public {
-        (uint256 otherX, uint256 otherY) = vm.publicKeyP256(OTHER_P256_KEY);
-        address otherSigner = _signer(bytes32(otherX), bytes32(otherY));
+    function test_differentMLDSASponsorIsRefused() public {
+        address otherSigner = _signer(_publicKey(0x42));
         assertRefusesFrame(
             paymaster,
             _payContext(
-                _singleSignature(SCHEME_P256, otherSigner, bytes32(0)), 0, 0.5 ether, SCOPE_PAYMENT
+                _singleSignature(SCHEME_ML_DSA_44, otherSigner, bytes32(0)),
+                0,
+                0.5 ether,
+                SCOPE_PAYMENT
             ),
             "only the configured sponsor key may authorise"
         );
@@ -173,7 +189,7 @@ contract P256PaymasterTest is PaymasterTestSuite {
         assertRefusesFrame(
             paymaster,
             _payContext(
-                _singleSignature(SCHEME_P256, sponsorSigner, keccak256("unrelated")),
+                _singleSignature(SCHEME_ML_DSA_44, sponsorSigner, keccak256("unrelated")),
                 0,
                 0.5 ether,
                 SCOPE_PAYMENT
@@ -186,7 +202,7 @@ contract P256PaymasterTest is PaymasterTestSuite {
         assertRefusesFrame(
             paymaster,
             _payContext(
-                _singleSignature(SCHEME_P256, sponsorSigner, bytes32(0)),
+                _singleSignature(SCHEME_ML_DSA_44, sponsorSigner, bytes32(0)),
                 0,
                 MAX_SPONSORED_COST + 1,
                 SCOPE_PAYMENT
@@ -197,7 +213,7 @@ contract P256PaymasterTest is PaymasterTestSuite {
 
     function test_scopeMustBeExactlyPayment() public {
         IFrameVm.FrameTxSignature[] memory signatures =
-            _singleSignature(SCHEME_P256, sponsorSigner, bytes32(0));
+            _singleSignature(SCHEME_ML_DSA_44, sponsorSigner, bytes32(0));
         assertRefusesFrame(
             paymaster,
             _payContext(signatures, 0, 0.5 ether, SCOPE_BOTH),
@@ -217,13 +233,13 @@ contract P256PaymasterTest is PaymasterTestSuite {
 
     function test_selectsTrustedEntryAfterUnrelatedEntry() public {
         IFrameVm.FrameTxSignature[] memory signatures = new IFrameVm.FrameTxSignature[](2);
-        signatures[0] = _signature(SCHEME_SECP256K1, sponsorSigner, bytes32(0));
-        signatures[1] = _signature(SCHEME_P256, sponsorSigner, bytes32(0));
+        signatures[0] = _signature(SCHEME_P256, sponsorSigner, bytes32(0));
+        signatures[1] = _signature(SCHEME_ML_DSA_44, sponsorSigner, bytes32(0));
 
         assertApprovesFrame(
             paymaster,
             _payContext(signatures, 1, 0.5 ether, SCOPE_PAYMENT),
-            "the selected trusted P256 entry may follow an unrelated entry"
+            "the selected trusted ML-DSA-44 entry may follow an unrelated entry"
         );
         assertRefusesFrame(
             paymaster,
@@ -232,9 +248,25 @@ contract P256PaymasterTest is PaymasterTestSuite {
         );
     }
 
+    function test_outOfRangeSignatureSelectionIsRefused() public {
+        assertRefusesFrame(
+            paymaster,
+            _payContext(
+                _singleSignature(SCHEME_ML_DSA_44, sponsorSigner, bytes32(0)),
+                1,
+                0.5 ether,
+                SCOPE_PAYMENT
+            ),
+            "an out-of-range signature index must not authorize sponsorship"
+        );
+    }
+
     function test_legacyArraySignatureSelectionAbiIsRefused() public {
         IFrameVm.FrameTx memory ctx = _payContext(
-            _singleSignature(SCHEME_P256, sponsorSigner, bytes32(0)), 0, 0.5 ether, SCOPE_PAYMENT
+            _singleSignature(SCHEME_ML_DSA_44, sponsorSigner, bytes32(0)),
+            0,
+            0.5 ether,
+            SCOPE_PAYMENT
         );
         uint256[] memory legacyIndices = new uint256[](1);
         legacyIndices[0] = 0;
@@ -251,18 +283,39 @@ contract P256PaymasterTest is PaymasterTestSuite {
 
         address payable recipient = payable(address(0xBEEF));
         uint256 beforeRecipient = recipient.balance;
-        P256Paymaster(payable(paymaster)).withdraw(recipient, 0.25 ether);
+        MLDSAPaymaster(payable(paymaster)).withdraw(recipient, 0.25 ether);
         assertEq(recipient.balance, beforeRecipient + 0.25 ether, "owner withdrawal");
     }
 
     function test_nonOwnerWithdrawalIsRefused() public {
         vm.prank(address(0xBAD));
-        vm.expectRevert(P256Paymaster.NotOwner.selector);
-        P256Paymaster(payable(paymaster)).withdraw(payable(address(0xBEEF)), 1 wei);
+        vm.expectRevert(MLDSAPaymaster.NotOwner.selector);
+        MLDSAPaymaster(payable(paymaster)).withdraw(payable(address(0xBEEF)), 1 wei);
     }
 
-    function test_allZeroSponsorKeyIsRefused() public {
-        vm.expectRevert(P256Paymaster.InvalidPublicKey.selector);
-        new P256Paymaster(bytes32(0), bytes32(0), MAX_SPONSORED_COST);
+    function test_failedWithdrawalIsReported() public {
+        RejectMLDSAWithdrawal recipient = new RejectMLDSAWithdrawal();
+        vm.expectRevert(MLDSAPaymaster.WithdrawFailed.selector);
+        MLDSAPaymaster(payable(paymaster)).withdraw(payable(address(recipient)), 1 wei);
+    }
+
+    function test_constructorRequiresExactPublicKeyLength() public {
+        bytes memory emptyKey = new bytes(0);
+        vm.expectRevert(
+            abi.encodeWithSelector(MLDSA44.InvalidPublicKeyLength.selector, emptyKey.length)
+        );
+        new MLDSAPaymaster(emptyKey, MAX_SPONSORED_COST);
+
+        bytes memory shortKey = new bytes(1_311);
+        vm.expectRevert(
+            abi.encodeWithSelector(MLDSA44.InvalidPublicKeyLength.selector, shortKey.length)
+        );
+        new MLDSAPaymaster(shortKey, MAX_SPONSORED_COST);
+
+        bytes memory longKey = new bytes(1_313);
+        vm.expectRevert(
+            abi.encodeWithSelector(MLDSA44.InvalidPublicKeyLength.selector, longKey.length)
+        );
+        new MLDSAPaymaster(longKey, MAX_SPONSORED_COST);
     }
 }

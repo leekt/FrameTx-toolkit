@@ -9,17 +9,10 @@ opcodes survive only in the Yul account (02) and in this library's own bodies:
 ```solidity
 import {FrameTxLib} from "../src/frame/FrameTxLib.sol";
 
-function validate(uint256[] calldata signatureIndices) external {
-    bool ownerSigned;
-    for (uint256 i; i < signatureIndices.length; ++i) {
-        uint256 sigIndex = signatureIndices[i];
-        if (FrameTxLib.sigScheme(sigIndex) == FrameTxLib.SCHEME_ARBITRARY) continue;
-        if (FrameTxLib.signedThisTx(sigIndex) && FrameTxLib.sigSigner(sigIndex) == owner) {
-            ownerSigned = true;
-            break;
-        }
-    }
-    if (!ownerSigned) revert();
+function validate(uint256 signatureIndex) external {
+    if (FrameTxLib.sigScheme(signatureIndex) == FrameTxLib.SCHEME_ARBITRARY) revert();
+    if (!FrameTxLib.signedThisTx(signatureIndex)) revert();
+    if (FrameTxLib.sigSigner(signatureIndex) != owner) revert();
 
     uint256 scope = FrameTxLib.frameAllowedScope(FrameTxLib.currentFrameIndex());
     if (scope == FrameTxLib.SCOPE_NONE) revert();
@@ -33,7 +26,7 @@ Source: [`FrameTxLib.sol`](../src/frame/FrameTxLib.sol)
 
 One `internal` function per opcode/param pair, plus allocating conveniences — everything
 inlines, nothing needs linking. Rows explicitly labeled "fixture" are host-supplied,
-non-normative tooling data; the other rows wrap the pinned EIP-8141/native-SIGDATACOPY
+non-normative tooling data; the other rows wrap the pinned upstream EIP-8141
 surface or helpers built from it:
 
 | Scope | Functions |
@@ -49,8 +42,19 @@ surface or helpers built from it:
 | Fixture POST_TX event data (`EVENTDATACOPY`) | `eventDataSlice` `eventData` |
 | Approval (`APPROVE`) | `approve(scope)` `approve(scope, returnData)` |
 
-Constants cover normative `SCHEME_*`, modes 0-2, `STATUS_*`, and `SCOPE_*`, plus the
-non-normative fixture `MODE_POST_TX` and the `EXPIRY_VERIFIER` predeploy address.
+Constants cover upstream `SCHEME_ARBITRARY`, `SCHEME_SECP256K1`, and `SCHEME_P256`, modes
+0-2, `STATUS_*`, and `SCOPE_*`, plus the non-normative fixture `MODE_POST_TX`, the
+`EXPIRY_VERIFIER` predeploy address, and toolkit-local
+`SCHEME_ML_DSA_44 = 3`. Upstream EIP-8141 reserves scheme `0x03`; the constant is usable
+only with the experimental local verifier documented in [`10-pq.md`](10-pq.md).
+
+`SCHEME_ML_DSA_44` is metadata, not an EVM cryptography API. The node verifies the
+3,732-byte native entry before frame execution, and `sigSigner` exposes its
+`low20(keccak256(0x03 || publicKey))` identity like the other native schemes. Raw ML-DSA
+bytes remain opaque to `sigData*`. The separate internal
+[`MLDSA44.sol`](../src/crypto/MLDSA44.sol) helper only enforces the 1,312-byte public-key
+shape and derives that identity for constructors and rotation; it does not verify a
+signature.
 
 Normative `TXPARAM(0x01)` is the scalar EIP-8141 wire nonce. A `setFrameTx` fixture may
 instead supply it as a shared keyed-nonce sequence. Selectors `0x80`-`0x84`, the nonce-key
@@ -60,7 +64,7 @@ host fixture; neither the library nor the cheatcode derives, orders, or verifies
 fixture must supply its value.
 
 `sigData`/`sigDataSlice` read an ARBITRARY entry's raw bytes through native `SIGDATACOPY`
-(`0xb5`).
+(`0xb5`). Native secp256k1, P256, and toolkit-local ML-DSA-44 bytes are all inaccessible.
 
 `approve(scope, returnData)` passes the byte array's payload directly to `APPROVE`. Because
 `APPROVE` terminates like `RETURN`, a low-level caller receives exactly those raw bytes, not

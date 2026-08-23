@@ -1,14 +1,31 @@
 # Building the toolkit
 
-The stack has three source components: patched **solc**, patched **revm**, and **Foundry**
-built against that revm. solc produces the account artifacts; the patched Forge executes
-them. Artifact generation must happen before `forge test`.
+The stack has four source components: patched **solc**, patched **revm**, patched
+**foundry-core**, and **Foundry** built against the latter two. solc produces the account
+artifacts; foundry-core exposes the experimental compiler target; the patched Forge executes
+the artifacts. Artifact generation must happen before `forge test`.
 
 ## Reproducibility
 
 The root gitlinks, Foundry's twelve REVM manifest patches, and `Cargo.lock` record the exact
-published commits in [VERSIONS.md](../VERSIONS.md). Follow the build order below from a fresh
-clone.
+current stack in [VERSIONS.md](../VERSIONS.md). A fresh recursive clone reproduces it:
+
+- Solidity `cc3e100a84ab68aca75a2b48e576cfbcc7237caf` is rebased onto upstream
+  `f985208342dc9d695a9097caf8206b11024df979`.
+- revm `cad0e9fc012f790719791ff274b76eb852689559` is rebased onto upstream
+  `17a323dac0f893aef6a29d48692185495b366149`.
+- foundry-core `f415f6fef0a62f44c7faa83daa8e37b14f0e009b` is rebased onto upstream
+  `78e5b57f86986eabd969a5fdf238b8159f7086fd`.
+- Foundry `ffe76454940945b3b8ae6c7a6a0ae2939b4ff126` is rebased onto upstream
+  `8bb78aeceda2eca7837d385e4f5bd39d6fc8bc71`.
+
+All four submodules use the pushed `feat/eip8141-current-spec` branch. Foundry promotion
+passed 30/30 primitives, 44/44 Anvil unit, and 31/31 Anvil integration tests. The root
+gitlinks pin these commits; `git submodule update --init --recursive` checks out the
+recorded stack. For update discovery, the repository's sync command fetches
+remote refs without automatically replacing the recorded checkouts.
+
+Follow the build order below from a fresh clone.
 
 Clone and initialize the recorded stack:
 
@@ -74,7 +91,11 @@ older submodule state.
 ## 2. Build Foundry against the patched revm and compilers
 
 Foundry's manifest and lockfile pin all twelve REVM crates and the foundry-core compilers
-fork (which adds the `@future` EVM version) to the published toolkit revisions:
+fork (which adds the `@future` EVM version) to the current revisions. Foundry commit
+`ffe76454940945b3b8ae6c7a6a0ae2939b4ff126` targets revm
+`cad0e9fc012f790719791ff274b76eb852689559` and foundry-core
+`f415f6fef0a62f44c7faa83daa8e37b14f0e009b`; all three commits are pushed and resolve from a
+clean recursive clone:
 
 ```bash
 cd ../foundry
@@ -93,10 +114,13 @@ and `solc = "../solidity/build/solc/solc"` in its default profile.
 
 ```bash
 cd ../contracts
-../foundry/target/debug/forge test
+../foundry/target/debug/forge test --allow-local-compiler
 # Or use the release binary:
-../foundry/target/release/forge test
+../foundry/target/release/forge test --allow-local-compiler
 ```
+
+Current Foundry requires `--allow-local-compiler` for an executable configured by path.
+Use it only after building `solidity/build/solc/solc` from the pinned Solidity submodule.
 
 Stock Forge cannot build or execute these tests: its compilers reject `@future`, its revm
 treats `0xaa` and `0xb0`-`0xb9` as invalid opcodes, and it lacks the frame-context

@@ -60,14 +60,13 @@ contract WebAuthnPaymasterTest is PaymasterTestSuite {
         return paymaster;
     }
 
-    function _paymasterTestSignatures()
+    function _paymasterTestSignature()
         internal
         view
         override
-        returns (IFrameVm.FrameTxSignature[] memory signatures)
+        returns (IFrameVm.FrameTxSignature memory signature)
     {
-        signatures = new IFrameVm.FrameTxSignature[](1);
-        signatures[0] = _entry(
+        signature = _entry(
             SCHEME_ARBITRARY,
             bytes32(0),
             _assertion(
@@ -82,15 +81,13 @@ contract WebAuthnPaymasterTest is PaymasterTestSuite {
         );
     }
 
-    function _paymasterTestCall(uint256[] memory signatureIndices)
+    function _paymasterTestCall(uint256 signatureIndex)
         internal
         pure
         override
         returns (bytes memory)
     {
-        return abi.encodeWithSelector(
-            WebAuthnPaymaster.sponsorTransaction.selector, signatureIndices
-        );
+        return abi.encodeWithSelector(WebAuthnPaymaster.sponsorTransaction.selector, signatureIndex);
     }
 
     function _paymasterTestMaxCost() internal pure override returns (uint256) {
@@ -154,20 +151,9 @@ contract WebAuthnPaymasterTest is PaymasterTestSuite {
         );
     }
 
-    function _indices(uint256 index) internal pure returns (uint256[] memory result) {
-        result = new uint256[](1);
-        result[0] = index;
-    }
-
-    function _indices(uint256 a, uint256 b) internal pure returns (uint256[] memory result) {
-        result = new uint256[](2);
-        result[0] = a;
-        result[1] = b;
-    }
-
     function _payContext(
         IFrameVm.FrameTxSignature memory signature,
-        uint256[] memory signatureIndices,
+        uint256 signatureIndex,
         uint256 maxCost,
         uint64 scope
     ) internal view returns (IFrameVm.FrameTx memory ctx) {
@@ -195,7 +181,7 @@ contract WebAuthnPaymasterTest is PaymasterTestSuite {
             stateGasLimit: 0,
             value: 0,
             data: abi.encodeWithSelector(
-                WebAuthnPaymaster.sponsorTransaction.selector, signatureIndices
+                WebAuthnPaymaster.sponsorTransaction.selector, signatureIndex
             ),
             status: 0,
             executionGasUsed: 0,
@@ -209,21 +195,18 @@ contract WebAuthnPaymasterTest is PaymasterTestSuite {
 
     function _assertInvalid(
         IFrameVm.FrameTxSignature memory signature,
-        uint256[] memory signatureIndices,
+        uint256 signatureIndex,
         uint256 maxCost,
         string memory reason
     ) internal {
         assertRefusesFrame(
-            paymaster, _payContext(signature, signatureIndices, maxCost, SCOPE_PAYMENT), reason
+            paymaster, _payContext(signature, signatureIndex, maxCost, SCOPE_PAYMENT), reason
         );
     }
 
     function test_realWebAuthnAssertionApprovesPayment() public {
         IFrameVm.FrameTx memory ctx = _payContext(
-            _entry(SCHEME_ARBITRARY, bytes32(0), _validAssertion()),
-            _indices(0),
-            0.5 ether,
-            SCOPE_PAYMENT
+            _entry(SCHEME_ARBITRARY, bytes32(0), _validAssertion()), 0, 0.5 ether, SCOPE_PAYMENT
         );
         ctx.approvableScopes = SCOPE_NONE;
         assertRefusesFrame(paymaster, ctx, "success must reach APPROVE(PAYMENT)");
@@ -234,16 +217,25 @@ contract WebAuthnPaymasterTest is PaymasterTestSuite {
     function test_nativeP256EntryCannotMasqueradeAsWebAuthn() public {
         _assertInvalid(
             _entry(SCHEME_P256, bytes32(0), ""),
-            _indices(0),
+            0,
             0.5 ether,
             "native P256 metadata is not a WebAuthn assertion"
+        );
+    }
+
+    function test_nativeMLDSAEntryCannotMasqueradeAsWebAuthn() public {
+        _assertInvalid(
+            mldsaSig(address(0xA44)),
+            0,
+            0.5 ether,
+            "native ML-DSA-44 metadata is not a WebAuthn assertion"
         );
     }
 
     function test_explicitMessageArbitraryEntryIsRefused() public {
         _assertInvalid(
             _entry(SCHEME_ARBITRARY, keccak256("explicit"), _validAssertion()),
-            _indices(0),
+            0,
             0.5 ether,
             "the assertion must challenge the canonical transaction"
         );
@@ -260,10 +252,7 @@ contract WebAuthnPaymasterTest is PaymasterTestSuite {
             false
         );
         _assertInvalid(
-            _entry(SCHEME_ARBITRARY, bytes32(0), witness),
-            _indices(0),
-            0.5 ether,
-            "challenge mismatch"
+            _entry(SCHEME_ARBITRARY, bytes32(0), witness), 0, 0.5 ether, "challenge mismatch"
         );
     }
 
@@ -278,7 +267,7 @@ contract WebAuthnPaymasterTest is PaymasterTestSuite {
             false
         );
         _assertInvalid(
-            _entry(SCHEME_ARBITRARY, bytes32(0), witness), _indices(0), 0.5 ether, "origin mismatch"
+            _entry(SCHEME_ARBITRARY, bytes32(0), witness), 0, 0.5 ether, "origin mismatch"
         );
     }
 
@@ -293,10 +282,7 @@ contract WebAuthnPaymasterTest is PaymasterTestSuite {
             false
         );
         _assertInvalid(
-            _entry(SCHEME_ARBITRARY, bytes32(0), witness),
-            _indices(0),
-            0.5 ether,
-            "credential mismatch"
+            _entry(SCHEME_ARBITRARY, bytes32(0), witness), 0, 0.5 ether, "credential mismatch"
         );
     }
 
@@ -311,17 +297,14 @@ contract WebAuthnPaymasterTest is PaymasterTestSuite {
             false
         );
         _assertInvalid(
-            _entry(SCHEME_ARBITRARY, bytes32(0), witness),
-            _indices(0),
-            0.5 ether,
-            "configured UV policy"
+            _entry(SCHEME_ARBITRARY, bytes32(0), witness), 0, 0.5 ether, "configured UV policy"
         );
     }
 
     function test_nonCanonicalWitnessIsRefused() public {
         _assertInvalid(
             _entry(SCHEME_ARBITRARY, bytes32(0), bytes.concat(_validAssertion(), hex"00")),
-            _indices(0),
+            0,
             0.5 ether,
             "trailing witness bytes"
         );
@@ -330,7 +313,7 @@ contract WebAuthnPaymasterTest is PaymasterTestSuite {
     function test_costAboveCapIsRefused() public {
         _assertInvalid(
             _entry(SCHEME_ARBITRARY, bytes32(0), _validAssertion()),
-            _indices(0),
+            0,
             MAX_SPONSORED_COST + 1,
             "sponsorship cap"
         );
@@ -341,28 +324,29 @@ contract WebAuthnPaymasterTest is PaymasterTestSuite {
             _entry(SCHEME_ARBITRARY, bytes32(0), _validAssertion());
         assertRefusesFrame(
             paymaster,
-            _payContext(signature, _indices(0), 0.5 ether, SCOPE_BOTH),
+            _payContext(signature, 0, 0.5 ether, SCOPE_BOTH),
             "paymaster must not accept BOTH"
         );
         assertRefusesFrame(
             paymaster,
-            _payContext(signature, _indices(0), 0.5 ether, SCOPE_EXECUTION),
+            _payContext(signature, 0, 0.5 ether, SCOPE_EXECUTION),
             "paymaster must not accept EXECUTION"
         );
         assertRefusesFrame(
             paymaster,
-            _payContext(signature, _indices(0), 0.5 ether, SCOPE_NONE),
+            _payContext(signature, 0, 0.5 ether, SCOPE_NONE),
             "paymaster must not accept NONE"
         );
     }
 
-    function test_exactlyOneSignatureMustBeSelected() public {
-        _assertInvalid(
-            _entry(SCHEME_ARBITRARY, bytes32(0), _validAssertion()),
-            _indices(0, 0),
-            0.5 ether,
-            "duplicate selected assertion"
+    function test_legacyArraySignatureSelectionAbiIsRefused() public {
+        IFrameVm.FrameTx memory ctx = _payContext(
+            _entry(SCHEME_ARBITRARY, bytes32(0), _validAssertion()), 0, 0.5 ether, SCOPE_PAYMENT
         );
+        uint256[] memory legacyIndices = new uint256[](1);
+        legacyIndices[0] = 0;
+        ctx.frames[1].data = abi.encodeWithSignature("sponsorTransaction(uint256[])", legacyIndices);
+        assertRefusesFrame(paymaster, ctx, "the removed dynamic-array ABI must not authorize");
     }
 
     function test_onlyOwnerMayWithdraw() public {

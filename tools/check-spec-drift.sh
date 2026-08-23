@@ -4,7 +4,7 @@
 # Exit 0: no drift. Exit 1: the spec moved -- see VERSIONS.md for what to re-check.
 set -euo pipefail
 
-PINNED_COMMIT="13d1b37672b8fb321c7e880b521cfe375683c9e4"
+PINNED_COMMIT="f767a1e8078e17c9b381a91d35a09492189ede1b"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OVERLAY="$REPO_ROOT/spec/EIP8141.md"
 PINNED_URL="https://raw.githubusercontent.com/ethereum/EIPs/$PINNED_COMMIT/EIPS/eip-8141.md"
@@ -24,7 +24,7 @@ curl -fsSL "$CURRENT_URL" -o "$current"
 if diff -q "$pinned" "$current" >/dev/null 2>&1; then
     echo "No upstream drift since the source pin."
     if ! diff -q "$pinned" "$OVERLAY" >/dev/null 2>&1; then
-        echo "The local document differs by design: it includes native SIGDATACOPY and a tooling appendix."
+        echo "The local document differs by design: upstream is preserved as the normative body, with clearly marked toolkit notes, the experimental ML-DSA-44 scheme 0x03, and a tooling appendix."
     fi
     exit 0
 fi

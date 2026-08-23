@@ -38,7 +38,10 @@ interface IHarness {
     function frameIsAtomicBatch(uint256 i) external view returns (bool);
     function frameValue(uint256 i) external view returns (uint256);
     function frameDataLoad(uint256 i, uint256 offset) external view returns (bytes32);
-    function frameDataSlice(uint256 i, uint256 offset, uint256 length) external view returns (bytes memory);
+    function frameDataSlice(uint256 i, uint256 offset, uint256 length)
+        external
+        view
+        returns (bytes memory);
     function frameData(uint256 i) external view returns (bytes memory);
     function isExpiryFrame(uint256 i) external view returns (bool);
     function expiryDeadline(uint256 i) external view returns (uint64);
@@ -47,7 +50,10 @@ interface IHarness {
     function sigMsg(uint256 i) external view returns (bytes32);
     function signedThisTx(uint256 i) external view returns (bool);
     function sigLength(uint256 i) external view returns (uint256);
-    function sigDataSlice(uint256 i, uint256 offset, uint256 length) external view returns (bytes memory);
+    function sigDataSlice(uint256 i, uint256 offset, uint256 length)
+        external
+        view
+        returns (bytes memory);
     function sigData(uint256 i) external view returns (bytes memory);
     function traceBalanceDiffCount() external view returns (uint256);
     function traceStorageDiffCount() external view returns (uint256);
@@ -78,11 +84,17 @@ interface IHarness {
     function accountCodeHashBefore(address account) external view returns (bytes32);
     function accountCodeHashAfter(address account) external view returns (bytes32);
     function accountStorageDiffCount(address account) external view returns (uint256);
-    function accountStorageDiffIndex(address account, uint256 localIndex) external view returns (uint256);
+    function accountStorageDiffIndex(address account, uint256 localIndex)
+        external
+        view
+        returns (uint256);
     function accountEventCount(address account) external view returns (uint256);
     function accountEventIndex(address account, uint256 localIndex) external view returns (uint256);
     function accountDiffFlags(address account) external view returns (uint256);
-    function eventDataSlice(uint256 eventIndex, uint256 dataOffset, uint256 length) external view returns (bytes memory);
+    function eventDataSlice(uint256 eventIndex, uint256 dataOffset, uint256 length)
+        external
+        view
+        returns (bytes memory);
     function eventData(uint256 eventIndex) external view returns (bytes memory);
     function approve(uint256 scope) external;
     function approveWithData(uint256 scope, bytes calldata data) external;
@@ -95,12 +107,15 @@ contract FrameTxLibTest is FrameTest {
     IHarness constant h = IHarness(HARNESS);
 
     bytes constant FRAME0_DATA = hex"6901f668";
-    bytes constant FRAME1_DATA = hex"00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff0102";
-    bytes constant ARB_SIG = hex"deadbeef00000000000000000000000000000000000000000000000000000000c0ffee";
+    bytes constant FRAME1_DATA =
+        hex"00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff0102";
+    bytes constant ARB_SIG =
+        hex"deadbeef00000000000000000000000000000000000000000000000000000000c0ffee";
     address constant SIGNER = address(0x0BEEF);
     bytes32 constant SIG_HASH = keccak256("sig hash");
     bytes32 constant OTHER_MSG = keccak256("some other digest");
-    bytes32 constant NONCE_KEYS_HASH = 0x12164bf9476413f64229734534ebb103701111099e71b229191a85aacab75697;
+    bytes32 constant NONCE_KEYS_HASH =
+        0x12164bf9476413f64229734534ebb103701111099e71b229191a85aacab75697;
 
     address constant TRACE_ACCOUNT_A = address(0x1000);
     address constant TRACE_ACCOUNT_B = address(0x2000);
@@ -125,22 +140,28 @@ contract FrameTxLibTest is FrameTest {
 
     function _trace() internal pure returns (IFrameVm.FrameTxTrace memory trace) {
         trace.balanceDiffs = new IFrameVm.FrameTxBalanceDiff[](2);
-        trace.balanceDiffs[0] =
-            IFrameVm.FrameTxBalanceDiff({account: TRACE_ACCOUNT_A, balanceBefore: 10, balanceAfter: 7});
-        trace.balanceDiffs[1] =
-            IFrameVm.FrameTxBalanceDiff({account: TRACE_ACCOUNT_B, balanceBefore: 20, balanceAfter: 25});
+        trace.balanceDiffs[0] = IFrameVm.FrameTxBalanceDiff({
+            account: TRACE_ACCOUNT_A, balanceBefore: 10, balanceAfter: 7
+        });
+        trace.balanceDiffs[1] = IFrameVm.FrameTxBalanceDiff({
+            account: TRACE_ACCOUNT_B, balanceBefore: 20, balanceAfter: 25
+        });
 
         trace.storageDiffs = new IFrameVm.FrameTxStorageDiff[](3);
-        trace.storageDiffs[0] =
-            IFrameVm.FrameTxStorageDiff({account: TRACE_ACCOUNT_A, key: 1, valueBefore: 0, valueAfter: 11});
-        trace.storageDiffs[1] =
-            IFrameVm.FrameTxStorageDiff({account: TRACE_ACCOUNT_A, key: 2, valueBefore: 3, valueAfter: 4});
-        trace.storageDiffs[2] =
-            IFrameVm.FrameTxStorageDiff({account: TRACE_ACCOUNT_B, key: 9, valueBefore: 5, valueAfter: 6});
+        trace.storageDiffs[0] = IFrameVm.FrameTxStorageDiff({
+            account: TRACE_ACCOUNT_A, key: 1, valueBefore: 0, valueAfter: 11
+        });
+        trace.storageDiffs[1] = IFrameVm.FrameTxStorageDiff({
+            account: TRACE_ACCOUNT_A, key: 2, valueBefore: 3, valueAfter: 4
+        });
+        trace.storageDiffs[2] = IFrameVm.FrameTxStorageDiff({
+            account: TRACE_ACCOUNT_B, key: 9, valueBefore: 5, valueAfter: 6
+        });
 
         trace.deployedContracts = new IFrameVm.FrameTxDeployedContract[](1);
-        trace.deployedContracts[0] =
-            IFrameVm.FrameTxDeployedContract({account: TRACE_DEPLOYED, codeHash: DEPLOYED_CODE_HASH});
+        trace.deployedContracts[0] = IFrameVm.FrameTxDeployedContract({
+            account: TRACE_DEPLOYED, codeHash: DEPLOYED_CODE_HASH
+        });
 
         trace.accountDiffs = new IFrameVm.FrameTxAccountDiff[](1);
         trace.accountDiffs[0] = IFrameVm.FrameTxAccountDiff({
@@ -204,16 +225,25 @@ contract FrameTxLibTest is FrameTest {
         });
 
         IFrameVm.FrameTxSignature[] memory sigs = new IFrameVm.FrameTxSignature[](2);
-        sigs[0] = IFrameVm.FrameTxSignature({scheme: 1, signer: SIGNER, msgHash: bytes32(0), signature: ""});
-        sigs[1] = IFrameVm.FrameTxSignature({scheme: 0, signer: address(0), msgHash: OTHER_MSG, signature: ARB_SIG});
+        sigs[0] = IFrameVm.FrameTxSignature({
+            scheme: 1, signer: SIGNER, msgHash: bytes32(0), signature: ""
+        });
+        sigs[1] = IFrameVm.FrameTxSignature({
+            scheme: 0, signer: address(0), msgHash: OTHER_MSG, signature: ARB_SIG
+        });
 
         uint256[] memory nonceKeys = new uint256[](2);
         nonceKeys[0] = 0xB0B;
         nonceKeys[1] = 0xA11CE;
 
-        IFrameVm.FrameTxRecentRootReference[] memory recentRoots = new IFrameVm.FrameTxRecentRootReference[](2);
-        recentRoots[0] = IFrameVm.FrameTxRecentRootReference({sourceId: SOURCE_ID_0, slot: 123, root: RECENT_ROOT_0});
-        recentRoots[1] = IFrameVm.FrameTxRecentRootReference({sourceId: SOURCE_ID_1, slot: 456, root: RECENT_ROOT_1});
+        IFrameVm.FrameTxRecentRootReference[] memory recentRoots =
+            new IFrameVm.FrameTxRecentRootReference[](2);
+        recentRoots[0] = IFrameVm.FrameTxRecentRootReference({
+            sourceId: SOURCE_ID_0, slot: 123, root: RECENT_ROOT_0
+        });
+        recentRoots[1] = IFrameVm.FrameTxRecentRootReference({
+            sourceId: SOURCE_ID_1, slot: 456, root: RECENT_ROOT_1
+        });
 
         ctx.sender = address(0xACC0);
         ctx.nonce = 7;
@@ -310,7 +340,9 @@ contract FrameTxLibTest is FrameTest {
             "word at 32 zero-padded"
         );
         assertEq(
-            h.frameDataSlice(1, 32, 4), abi.encodePacked(hex"0102", new bytes(2)), "slice crossing the end zero-filled"
+            h.frameDataSlice(1, 32, 4),
+            abi.encodePacked(hex"0102", new bytes(2)),
+            "slice crossing the end zero-filled"
         );
     }
 
@@ -349,7 +381,11 @@ contract FrameTxLibTest is FrameTest {
         assertEq(h.sigLength(1), ARB_SIG.length, "sig 1 length");
         assertEq(h.sigData(1), ARB_SIG, "sig 1 full bytes");
         assertEq(h.sigDataSlice(1, 32, 3), hex"c0ffee", "sig 1 tail slice");
-        assertEq(h.sigDataSlice(1, 32, 8), abi.encodePacked(hex"c0ffee", new bytes(5)), "sig 1 slice zero-filled");
+        assertEq(
+            h.sigDataSlice(1, 32, 8),
+            abi.encodePacked(hex"c0ffee", new bytes(5)),
+            "sig 1 slice zero-filled"
+        );
     }
 
     function test_txTraceBalanceStorageAndDeployments() public inFrame {
@@ -404,7 +440,9 @@ contract FrameTxLibTest is FrameTest {
     }
 
     function test_invalidRecentRootIndexHalts() public inFrame {
-        _assertHarnessCallFails(abi.encodeCall(IHarness.recentRoot, (2)), "recent-root index past the end must fail");
+        _assertHarnessCallFails(
+            abi.encodeCall(IHarness.recentRoot, (2)), "recent-root index past the end must fail"
+        );
     }
 
     function test_emptyNonceKeyListHalts() public {
@@ -418,13 +456,18 @@ contract FrameTxLibTest is FrameTest {
     }
 
     function test_outOfRangeFrameAndSignatureIndexesHalt() public inFrame {
-        _assertHarnessCallFails(abi.encodeCall(IHarness.frameTarget, (2)), "frame index past the end must fail");
-        _assertHarnessCallFails(abi.encodeCall(IHarness.sigScheme, (2)), "signature index past the end must fail");
+        _assertHarnessCallFails(
+            abi.encodeCall(IHarness.frameTarget, (2)), "frame index past the end must fail"
+        );
+        _assertHarnessCallFails(
+            abi.encodeCall(IHarness.sigScheme, (2)), "signature index past the end must fail"
+        );
     }
 
     function test_outOfRangeGlobalAndLocalTraceIndexesHalt() public inFrame {
         _assertHarnessCallFails(
-            abi.encodeCall(IHarness.traceBalanceAccount, (2)), "global balance-diff index past the end must fail"
+            abi.encodeCall(IHarness.traceBalanceAccount, (2)),
+            "global balance-diff index past the end must fail"
         );
         _assertHarnessCallFails(
             abi.encodeCall(IHarness.accountStorageDiffIndex, (TRACE_ACCOUNT_A, 2)),
@@ -438,9 +481,12 @@ contract FrameTxLibTest is FrameTest {
 
     function test_outOfRangeEventAndTopicIndexesHalt() public inFrame {
         _assertHarnessCallFails(
-            abi.encodeCall(IHarness.eventDataSlice, (3, 0, 0)), "event-data index past the end must fail"
+            abi.encodeCall(IHarness.eventDataSlice, (3, 0, 0)),
+            "event-data index past the end must fail"
         );
-        _assertHarnessCallFails(abi.encodeCall(IHarness.traceEventTopic1, (0)), "missing topic index must fail");
+        _assertHarnessCallFails(
+            abi.encodeCall(IHarness.traceEventTopic1, (0)), "missing topic index must fail"
+        );
     }
 
     function test_traceOpcodesOutsidePostTxHalt() public {
@@ -449,7 +495,8 @@ contract FrameTxLibTest is FrameTest {
         fvm.setFrameTx(ctx);
 
         (bool traceOk,) = HARNESS.call(abi.encodeCall(IHarness.traceBalanceDiffCount, ()));
-        (bool diffOk,) = HARNESS.call(abi.encodeCall(IHarness.accountBalanceBefore, (TRACE_ACCOUNT_A)));
+        (bool diffOk,) =
+            HARNESS.call(abi.encodeCall(IHarness.accountBalanceBefore, (TRACE_ACCOUNT_A)));
         (bool eventOk,) = HARNESS.call(abi.encodeCall(IHarness.eventDataSlice, (1, 0, 1)));
 
         assertFalse(traceOk, "TXTRACE outside POST_TX must fail");
@@ -460,41 +507,52 @@ contract FrameTxLibTest is FrameTest {
 
     function test_eventDataSourceOverrunHalts() public inFrame {
         _assertHarnessCallFails(
-            abi.encodeCall(IHarness.eventDataSlice, (1, 4, 3)), "EVENTDATACOPY must not zero-fill past event data"
+            abi.encodeCall(IHarness.eventDataSlice, (1, 4, 3)),
+            "EVENTDATACOPY must not zero-fill past event data"
         );
     }
 
     /// Reading the raw bytes of a protocol-verified entry must halt: the spec
     /// keeps those opaque so schemes can be aggregated later.
     function test_sigDataOfProtocolSchemeHalts() public inFrame {
-        _assertHarnessCallFails(abi.encodeCall(IHarness.sigData, (0)), "copying SECP256K1 bytes must fail");
+        _assertHarnessCallFails(
+            abi.encodeCall(IHarness.sigData, (0)), "copying SECP256K1 bytes must fail"
+        );
     }
 
     /// Asking an ARBITRARY entry for its resolved signer must halt: there is
     /// none -- the protocol verified nothing.
     function test_sigSignerOfArbitraryHalts() public inFrame {
-        _assertHarnessCallFails(abi.encodeCall(IHarness.sigSigner, (1)), "resolved signer of ARBITRARY must fail");
+        _assertHarnessCallFails(
+            abi.encodeCall(IHarness.sigSigner, (1)), "resolved signer of ARBITRARY must fail"
+        );
     }
 
     /// The signature length of a protocol-verified entry is not readable:
     /// raw bytes stay opaque, length included (EIPs PR 12187).
     function test_sigLengthOfProtocolSchemeHalts() public inFrame {
-        _assertHarnessCallFails(abi.encodeCall(IHarness.sigLength, (0)), "length of SECP256K1 bytes must fail");
+        _assertHarnessCallFails(
+            abi.encodeCall(IHarness.sigLength, (0)), "length of SECP256K1 bytes must fail"
+        );
     }
 
     /// Receipt gas of the current frame does not exist yet, like its status.
     function test_currentFrameReceiptGasHalts() public inFrame {
         _assertHarnessCallFails(
-            abi.encodeCall(IHarness.frameExecutionGasUsed, (1)), "gas_used.execution of the current frame must fail"
+            abi.encodeCall(IHarness.frameExecutionGasUsed, (1)),
+            "gas_used.execution of the current frame must fail"
         );
         _assertHarnessCallFails(
-            abi.encodeCall(IHarness.frameStateGasUsed, (1)), "gas_used.state of the current frame must fail"
+            abi.encodeCall(IHarness.frameStateGasUsed, (1)),
+            "gas_used.state of the current frame must fail"
         );
     }
 
     /// The status of the current frame is not readable.
     function test_currentFrameStatusHalts() public inFrame {
-        _assertHarnessCallFails(abi.encodeCall(IHarness.frameStatus, (1)), "status of the current frame must fail");
+        _assertHarnessCallFails(
+            abi.encodeCall(IHarness.frameStatus, (1)), "status of the current frame must fail"
+        );
     }
 
     function test_txParamWithoutContextHalts() public {

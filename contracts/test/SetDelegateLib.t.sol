@@ -40,13 +40,14 @@ contract SetDelegateLibTest is FrameTest {
     }
 
     function test_setDelegate_haltsWhileEip7819Disabled() public {
-        (bool ok,) =
-            address(harness).call(abi.encodeCall(ISetDelegateHarness.setDelegate, (bytes32(0), address(0xBEEF))));
+        (bool ok,) = address(harness)
+            .call(abi.encodeCall(ISetDelegateHarness.setDelegate, (bytes32(0), address(0xBEEF))));
         assertFalse(ok);
     }
 
     function test_clearDelegate_haltsWhileEip7819Disabled() public {
-        (bool ok,) = address(harness).call(abi.encodeCall(ISetDelegateHarness.clearDelegate, (bytes32(0))));
+        (bool ok,) =
+            address(harness).call(abi.encodeCall(ISetDelegateHarness.clearDelegate, (bytes32(0))));
         assertFalse(ok);
     }
 }

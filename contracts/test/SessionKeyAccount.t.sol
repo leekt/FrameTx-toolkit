@@ -139,7 +139,7 @@ contract SessionKeyAccountTest is AccountTestSuite {
             gasLimit: 200_000,
             stateGasLimit: 0,
             value: 0,
-            data: validationCalldata(selected(0)),
+            data: validationCalldata(0),
             status: 0,
             executionGasUsed: 0,
             stateGasUsed: 0
@@ -195,6 +195,16 @@ contract SessionKeyAccountTest is AccountTestSuite {
         );
     }
 
+    function test_mldsaSessionKeyOnAllowlistedCallApproves() public {
+        IFrameVm.FrameTx memory ctx = _ctx(SESSION, TOKEN, 0, _transfer());
+        ctx.signatures[0] = mldsaSig(SESSION);
+        assertApprovesFrame(
+            account,
+            ctx,
+            "a native ML-DSA-44 session-key identity must follow the same allowlist policy"
+        );
+    }
+
     /// The owner is unconditional: the same frame the session key is refused for
     /// below is fine when the owner signed it.
     function test_ownerBypassesTheAllowlist() public {
@@ -204,6 +214,16 @@ contract SessionKeyAccountTest is AccountTestSuite {
                 OWNER, OTHER_TOKEN, 1 ether, abi.encodeWithSelector(APPROVE_SEL, OWNER, uint256(1))
             ),
             "owner must approve regardless of the frame policy"
+        );
+    }
+
+    function test_mldsaOwnerBypassesTheAllowlist() public {
+        IFrameVm.FrameTx memory ctx = _ctx(
+            OWNER, OTHER_TOKEN, 1 ether, abi.encodeWithSelector(APPROVE_SEL, OWNER, uint256(1))
+        );
+        ctx.signatures[0] = mldsaSig(OWNER);
+        assertApprovesFrame(
+            account, ctx, "a native ML-DSA-44 owner identity must keep unconditional authority"
         );
     }
 
@@ -217,17 +237,17 @@ contract SessionKeyAccountTest is AccountTestSuite {
         );
     }
 
-    /// The owner wins wherever it appears, so a stray session-key entry cannot
-    /// downgrade an owner-signed transaction into the restricted policy.
-    function test_ownerWinsOverSessionKeyEntry() public {
+    /// Selection is explicit: an earlier, unselected session-key entry cannot
+    /// downgrade the later owner authorization into the restricted policy.
+    function test_shiftedOwnerIndexIgnoresUnselectedSessionKeyEntry() public {
         IFrameVm.FrameTx memory ctx =
             _ctx(SESSION, OTHER_TOKEN, 0, abi.encodeWithSelector(APPROVE_SEL, OWNER, uint256(1)));
         IFrameVm.FrameTxSignature[] memory sigs = new IFrameVm.FrameTxSignature[](2);
         sigs[0] = secpSig(SESSION);
         sigs[1] = secpSig(OWNER);
         ctx.signatures = sigs;
-        ctx.frames[1].data = validationCalldata(selected(0, 1));
-        assertApprovesFrame(account, ctx, "an owner entry anywhere in the list wins");
+        ctx.frames[1].data = validationCalldata(1);
+        assertApprovesFrame(account, ctx, "the shifted owner entry must authorize");
     }
 
     // ------------------------------------------------------------------ negative

@@ -5,7 +5,10 @@ import {FrameTest} from "./FrameTest.sol";
 
 interface ISelfDelegateHarness {
     function setSelfDelegate(address target) external returns (bool);
-    function delegation(address account) external view returns (bool isDelegation, bool ecdsaDisabled, address target);
+    function delegation(address account)
+        external
+        view
+        returns (bool isDelegation, bool ecdsaDisabled, address target);
     function isEcdsaDisabled(address account) external view returns (bool);
 }
 
@@ -64,7 +67,8 @@ contract SelfDelegateLibTest is FrameTest {
     }
 
     function test_setSelfDelegate_haltsWhileEip7851Disabled() public {
-        (bool ok,) = address(harness).call(abi.encodeCall(ISelfDelegateHarness.setSelfDelegate, (TARGET)));
+        (bool ok,) =
+            address(harness).call(abi.encodeCall(ISelfDelegateHarness.setSelfDelegate, (TARGET)));
         assertFalse(ok);
     }
 }

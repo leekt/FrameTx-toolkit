@@ -18,17 +18,15 @@ object "MinimalAccount" {
 
     object "runtime" {
         code {
-            // Empty calldata is the funding path. Validation uses the shared
-            // `validate(uint256[])` ABI below and therefore never arrives empty.
+            // Empty calldata is the funding path. Validation uses the compact
+            // `validate(uint256)` ABI below and therefore never arrives empty.
             if iszero(calldatasize()) { stop() }
 
-            // validate(uint256[]) with exactly one selected signature index:
-            // selector | offset=0x20 | length=1 | signatureIndex.
-            if iszero(eq(calldatasize(), 0x64)) { revert(0, 0) }
-            if iszero(eq(shr(224, calldataload(0)), 0x25b90494)) { revert(0, 0) }
-            if iszero(eq(calldataload(0x04), 0x20)) { revert(0, 0) }
-            if iszero(eq(calldataload(0x24), 1)) { revert(0, 0) }
-            let signatureIndex := calldataload(0x44)
+            // validate(uint256) is exactly selector | signatureIndex. Requiring
+            // 36 bytes rejects short, dynamic-array, and trailing encodings.
+            if iszero(eq(calldatasize(), 0x24)) { revert(0, 0) }
+            if iszero(eq(shr(224, calldataload(0)), 0xce4d01a3)) { revert(0, 0) }
+            let signatureIndex := calldataload(0x04)
 
             // --- verbatim argument order --------------------------------------
             // For verbatim_Ni_Mo the FIRST argument is pushed LAST, so it ends up
@@ -42,10 +40,11 @@ object "MinimalAccount" {
             //   param          = 0  -> resolved_signer
             //
             // This is the whole point of EIP-8141 account validation: the
-            // protocol has ALREADY verified every secp256k1/P256 signature in the
-            // envelope against its selected message before this frame runs. The
-            // account never calls ecrecover; it asks which key signed, then below
-            // requires that the selected message was this transaction's hash.
+            // protocol has ALREADY verified every supported native signature in
+            // the envelope against its selected message before this frame runs.
+            // That includes the toolkit-local ML-DSA-44 profile. The account asks
+            // which key signed, then below requires that the selected message was
+            // this transaction's hash.
             let signer := verbatim_2i_1o(hex"b4", signatureIndex, 0x00)
 
             // param = 0x02 -> msg. Zero is the reserved EVM representation for

@@ -8,10 +8,11 @@ import {IFrameAccount} from "./IFrameAccount.sol";
 /// @author taek <leekt216@gmail.com>
 /// @notice The canonical single-owner EIP-8141 smart account.
 /// @dev    The account does NOT verify a signature. Before frame 0, the protocol
-///         verified every SECP256K1 / P256 entry against either the canonical
-///         transaction hash or its explicit digest. Signed VERIFY-frame calldata
-///         selects the signature entries this account should inspect; one of those
-///         entries must come from the owner over this transaction.
+///         verified every native entry (SECP256K1, P256, or the toolkit-local
+///         ML-DSA-44 scheme) against either the canonical transaction hash or its
+///         explicit digest. Signed VERIFY-frame calldata selects the signature
+///         entry this account should inspect; that entry must come from the owner
+///         over this transaction.
 contract OwnerAccount is IFrameAccount {
     /// @dev Slot 0. The key authorised to spend from this account.
     address public owner;
@@ -26,7 +27,7 @@ contract OwnerAccount is IFrameAccount {
     }
 
     /// @notice VERIFY-frame entry point, called by `ENTRY_POINT` (`address(0xaa)`).
-    /// @param signatureIndices Entries in `tx.signatures` selected by the
+    /// @param signatureIndex Entry in `tx.signatures` selected by the
     ///        transaction builder for this account's policy.
     /// @dev    Runs as a STATICCALL: no SSTORE, no LOG, no state-changing calls are
     ///         possible here, which is why every check below is a pure read. APPROVE
@@ -34,25 +35,18 @@ contract OwnerAccount is IFrameAccount {
     ///         VERIFY frame. A revert in a VERIFY frame invalidates the WHOLE
     ///         transaction (and unrolls any APPROVE), so a revert is the
     ///         rejection path -- there is no "return false".
-    function validate(uint256[] calldata signatureIndices) external override {
-        bool ownerSigned;
-        for (uint256 i = 0; i < signatureIndices.length; ++i) {
-            uint256 sigIndex = signatureIndices[i];
-
-            // ARBITRARY entries have no resolved signer, so asking SIGPARAM for
-            // one would halt exceptionally. P256 and SECP256K1 both have a
-            // protocol-verified resolved signer and are acceptable here.
-            if (FrameTxLib.sigScheme(sigIndex) == FrameTxLib.SCHEME_ARBITRARY) continue;
-
-            // Zero is the EVM-visible marker for the canonical transaction hash.
-            // An explicit digest does not authorize this frame list.
-            if (!FrameTxLib.signedThisTx(sigIndex)) continue;
-            if (FrameTxLib.sigSigner(sigIndex) == owner) {
-                ownerSigned = true;
-                break;
-            }
+    function validate(uint256 signatureIndex) external override {
+        // ARBITRARY entries have no resolved signer, so asking SIGPARAM for one
+        // would halt exceptionally. Every supported native scheme has a
+        // protocol-verified resolved signer and is acceptable here.
+        if (FrameTxLib.sigScheme(signatureIndex) == FrameTxLib.SCHEME_ARBITRARY) {
+            revert NoTrustedSignature();
         }
-        if (!ownerSigned) revert NoTrustedSignature();
+
+        // Zero is the EVM-visible marker for the canonical transaction hash.
+        // An explicit digest does not authorize this frame list.
+        if (!FrameTxLib.signedThisTx(signatureIndex)) revert NoTrustedSignature();
+        if (FrameTxLib.sigSigner(signatureIndex) != owner) revert NoTrustedSignature();
 
         // Use the scope named by this frame: BOTH for self relay, EXECUTION when
         // a paymaster pays, or PAYMENT when this account pays for another sender.
@@ -72,8 +66,8 @@ contract OwnerAccount is IFrameAccount {
     /// @return flags      FRAMEPARAM 0x03 for that frame; `flags & 0x3` is the
     ///                    approval scope APPROVE is allowed to request.
     /// @return mode       FRAMEPARAM 0x02: 0 = DEFAULT, 1 = VERIFY, 2 = SENDER.
-    /// @return signer0    SIGPARAM 0x00 for envelope index zero. Validation may
-    ///                    inspect different indices selected by its calldata.
+    /// @return signer0    SIGPARAM 0x00 for envelope index zero. `validate`
+    ///                    instead inspects the one index supplied in its calldata.
     function frameContext()
         external
         view

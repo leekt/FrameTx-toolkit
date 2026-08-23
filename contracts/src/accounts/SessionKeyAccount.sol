@@ -10,10 +10,11 @@ import {IFrameAccount} from "./IFrameAccount.sol";
 ///         *session keys* may only drive a pre-approved (target, selector) set
 ///         with zero value, and only until the key's expiry.
 ///
-/// Before this code runs, the protocol has verified every SECP256K1 / P256
-/// signature against either `compute_sig_hash(tx)` or its explicit digest. This
-/// account never calls `ecrecover`: it asks SIGPARAM which key signed, requires
-/// the canonical transaction-hash case, and applies policy.
+/// Before this code runs, the protocol has verified every native signature
+/// (SECP256K1, P256, or the toolkit-local ML-DSA-44 scheme) against either
+/// `compute_sig_hash(tx)` or its explicit digest. This account never performs
+/// cryptographic verification: it asks SIGPARAM which key signed, requires the
+/// canonical transaction-hash case, and applies policy.
 ///
 /// The policy for a session key is enforced by cross-frame introspection: the
 /// VERIFY frame walks every frame the transaction will execute and rejects the
@@ -80,8 +81,8 @@ contract SessionKeyAccount is IFrameAccount {
     ///      frame executes as a STATICCALL — no SSTORE, no logs, no
     ///      state-changing calls. Only APPROVE is exempt.
     ///      Reverting here makes the whole transaction invalid.
-    function validate(uint256[] calldata signatureIndices) external override {
-        (bool ownerSigned, uint64 sessionValidUntil) = _authorize(signatureIndices);
+    function validate(uint256 signatureIndex) external override {
+        (bool ownerSigned, uint64 sessionValidUntil) = _authorize(signatureIndex);
         if (!ownerSigned && sessionValidUntil == 0) revert NoTrustedSignature();
 
         // Owner: unconditional. Session key: the transaction must be
@@ -105,34 +106,28 @@ contract SessionKeyAccount is IFrameAccount {
         FrameTxLib.approve(scope);
     }
 
-    /// @dev Scans only the explicitly selected signature entries for a key this account trusts.
-    ///      The protocol already checked the cryptography; we only decide whom
-    ///      we recognise. The owner wins wherever it appears in the list, so a
-    ///      stray session-key entry cannot downgrade an owner-signed
-    ///      transaction into the restricted policy. For session keys the
-    ///      longest-lived signer wins; any one valid signature suffices.
-    function _authorize(uint256[] calldata signatureIndices)
+    /// @dev Checks the explicitly selected signature entry for a key this
+    ///      account trusts. The protocol already checked the cryptography; we
+    ///      only decide whether the resolved signer is the owner or a session key.
+    function _authorize(uint256 signatureIndex)
         private
         view
         returns (bool ownerSigned, uint64 sessionValidUntil)
     {
-        for (uint256 i = 0; i < signatureIndices.length; ++i) {
-            uint256 sigIndex = signatureIndices[i];
-            // ARBITRARY entries carry no resolved signer — sigSigner on one is
-            // an exceptional halt, so filter by scheme first.
-            if (FrameTxLib.sigScheme(sigIndex) == FrameTxLib.SCHEME_ARBITRARY) continue;
-
-            // msg == 0 means the signature is over compute_sig_hash(tx), which
-            // commits to the entire frame list. An explicit 32-byte msg does
-            // not, and must never be accepted as authority to grant EXECUTION
-            // (see README, "Why every frame is checked").
-            if (!FrameTxLib.signedThisTx(sigIndex)) continue;
-
-            address s = FrameTxLib.sigSigner(sigIndex);
-            if (s == owner) return (true, sessionValidUntil);
-            uint64 validUntil = sessionKeys[s];
-            if (validUntil > sessionValidUntil) sessionValidUntil = validUntil;
+        // ARBITRARY entries carry no resolved signer — sigSigner on one is an
+        // exceptional halt, so filter by scheme first.
+        if (FrameTxLib.sigScheme(signatureIndex) == FrameTxLib.SCHEME_ARBITRARY) {
+            return (false, 0);
         }
+
+        // msg == 0 means the signature is over compute_sig_hash(tx), which
+        // commits to the entire frame list. An explicit 32-byte msg does not,
+        // and must never authorize EXECUTION.
+        if (!FrameTxLib.signedThisTx(signatureIndex)) return (false, 0);
+
+        address signer = FrameTxLib.sigSigner(signatureIndex);
+        if (signer == owner) return (true, 0);
+        sessionValidUntil = sessionKeys[signer];
     }
 
     /// @dev Requires the transaction to be provably dead before the session key

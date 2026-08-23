@@ -2,26 +2,24 @@
 pragma solidity ^0.8.30;
 
 import {FrameTxLib} from "../frame/FrameTxLib.sol";
+import {MLDSA44} from "../crypto/MLDSA44.sol";
 
-/// @title P256Paymaster
-/// @notice An EIP-8141 paymaster authorised by a protocol-verified P256 key.
-contract P256Paymaster {
+/// @title MLDSAPaymaster
+/// @notice An EIP-8141 paymaster authorised by native ML-DSA-44 scheme 0x03.
+contract MLDSAPaymaster {
     address public immutable owner;
     address public immutable sponsorSigner;
     uint256 public immutable maxSponsoredCost;
 
-    error InvalidPublicKey();
     error NotOwner();
     error WithdrawFailed();
     error NoTrustedSignature();
     error CostTooHigh(uint256 maxCost);
     error InvalidApprovalScope(uint256 scope);
 
-    constructor(bytes32 sponsorQx, bytes32 sponsorQy, uint256 maxSponsoredCost_) payable {
-        if (sponsorQx == bytes32(0) && sponsorQy == bytes32(0)) revert InvalidPublicKey();
-
+    constructor(bytes memory sponsorPublicKey, uint256 maxSponsoredCost_) payable {
         owner = msg.sender;
-        sponsorSigner = address(uint160(uint256(keccak256(abi.encodePacked(sponsorQx, sponsorQy)))));
+        sponsorSigner = MLDSA44.signerForKey(sponsorPublicKey);
         maxSponsoredCost = maxSponsoredCost_;
     }
 
@@ -33,23 +31,26 @@ contract P256Paymaster {
         if (!ok) revert WithdrawFailed();
     }
 
-    /// @notice Approve payment when the selected canonical P256 entry was made
-    ///         by the configured sponsor key.
+    /// @notice Approve payment when the selected canonical ML-DSA-44 entry was
+    ///         made by the configured sponsor key.
     function sponsorTransaction(uint256 signatureIndex) external {
-        if (FrameTxLib.sigScheme(signatureIndex) != FrameTxLib.SCHEME_P256) {
+        if (FrameTxLib.sigScheme(signatureIndex) != FrameTxLib.SCHEME_ML_DSA_44) {
             revert NoTrustedSignature();
         }
         if (!FrameTxLib.signedThisTx(signatureIndex)) revert NoTrustedSignature();
-        if (FrameTxLib.sigSigner(signatureIndex) != sponsorSigner) revert NoTrustedSignature();
+        if (FrameTxLib.sigSigner(signatureIndex) != sponsorSigner) {
+            revert NoTrustedSignature();
+        }
 
         uint256 maxCost = FrameTxLib.maxCost();
         if (maxCost > maxSponsoredCost) revert CostTooHigh(maxCost);
 
-        // A third-party paymaster must be a dedicated `pay` frame. Requiring
-        // the exact scope avoids accepting a frame that also advertises an
-        // execution permission the paymaster can never legitimately grant.
         uint256 scope = FrameTxLib.frameAllowedScope(FrameTxLib.currentFrameIndex());
         if (scope != FrameTxLib.SCOPE_PAYMENT) revert InvalidApprovalScope(scope);
         FrameTxLib.approve(FrameTxLib.SCOPE_PAYMENT);
+    }
+
+    function signerForKey(bytes calldata publicKey) external pure returns (address) {
+        return MLDSA44.signerForKey(publicKey);
     }
 }

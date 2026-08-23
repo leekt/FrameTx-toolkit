@@ -145,7 +145,11 @@ contract FrameTxLibHarness {
         return FrameTxLib.frameDataLoad(i, offset);
     }
 
-    function frameDataSlice(uint256 i, uint256 offset, uint256 length) external view returns (bytes memory) {
+    function frameDataSlice(uint256 i, uint256 offset, uint256 length)
+        external
+        view
+        returns (bytes memory)
+    {
         return FrameTxLib.frameDataSlice(i, offset, length);
     }
 
@@ -181,7 +185,11 @@ contract FrameTxLibHarness {
         return FrameTxLib.sigLength(i);
     }
 
-    function sigDataSlice(uint256 i, uint256 offset, uint256 length) external view returns (bytes memory) {
+    function sigDataSlice(uint256 i, uint256 offset, uint256 length)
+        external
+        view
+        returns (bytes memory)
+    {
         return FrameTxLib.sigDataSlice(i, offset, length);
     }
 
@@ -305,7 +313,11 @@ contract FrameTxLibHarness {
         return FrameTxLib.accountStorageDiffCount(account);
     }
 
-    function accountStorageDiffIndex(address account, uint256 localIndex) external view returns (uint256) {
+    function accountStorageDiffIndex(address account, uint256 localIndex)
+        external
+        view
+        returns (uint256)
+    {
         return FrameTxLib.accountStorageDiffIndex(account, localIndex);
     }
 
@@ -313,7 +325,11 @@ contract FrameTxLibHarness {
         return FrameTxLib.accountEventCount(account);
     }
 
-    function accountEventIndex(address account, uint256 localIndex) external view returns (uint256) {
+    function accountEventIndex(address account, uint256 localIndex)
+        external
+        view
+        returns (uint256)
+    {
         return FrameTxLib.accountEventIndex(account, localIndex);
     }
 

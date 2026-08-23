@@ -1,11 +1,26 @@
 # FrameTx Toolkit
 
-Everything needed to write and run [EIP-8141](https://forkcast.org/eips/8141) frame transaction contracts:
+Everything needed to write and run [EIP-8141](https://eips.ethereum.org/EIPS/eip-8141) frame transaction contracts:
 a patched **revm/Foundry** that executes them, a patched **solc** that compiles them, and
 worked smart accounts with tests.
 
-EIP-8141 is a **draft**. The upstream spec base and each published submodule gitlink are
+EIP-8141 is a **draft**. The upstream spec base and each current submodule gitlink are
 recorded at exact commits in [VERSIONS.md](VERSIONS.md).
+
+> [!note] Reproducible current stack
+> All four submodules use the advertised branch `feat/eip8141-current-spec`: Solidity
+> `cc3e100a84ab68aca75a2b48e576cfbcc7237caf` on upstream
+> `f985208342dc9d695a9097caf8206b11024df979`; revm
+> `cad0e9fc012f790719791ff274b76eb852689559` on upstream
+> `17a323dac0f893aef6a29d48692185495b366149`; foundry-core
+> `f415f6fef0a62f44c7faa83daa8e37b14f0e009b` on upstream
+> `78e5b57f86986eabd969a5fdf238b8159f7086fd`; and Foundry
+> `ffe76454940945b3b8ae6c7a6a0ae2939b4ff126` on upstream
+> `8bb78aeceda2eca7837d385e4f5bd39d6fc8bc71`. Foundry promotion passed 30/30 primitives,
+> 44/44 Anvil unit, and 31/31 Anvil integration tests. The root gitlinks pin these exact
+> pushed commits, so a fresh recursive clone reproduces this stack. To inspect later upstream
+> or feature-branch movement without changing those pins, use
+> [the fetch-only submodule sync command](.claude/commands/sync-submodules.md).
 
 ## Getting started
 
@@ -13,8 +28,8 @@ Nothing gets installed: the patched solc and forge/anvil are built inside the su
 and invoked by path, so your existing `forge` (`~/.foundry/bin`) and any system solc stay
 untouched.
 
-**1. Get the stack** (the gitlinks pin the exact revm/foundry commits the tests expect;
-stale binaries built from older submodule states will fail):
+**1. Get the current stack** (the gitlinks pin its exact revm/foundry commits; stale
+binaries built from other submodule states will fail):
 
 ```bash
 git clone --recurse-submodules https://github.com/leekt/FrameTx-toolkit.git
@@ -23,10 +38,10 @@ cd FrameTx-toolkit
 git pull && git submodule update --init --recursive
 ```
 
-**2. Build the two patched tools** (once, then incremental). Foundry's manifest pins the
-revm fork (all twelve crates) and the foundry-core fork (compilers with the `@future` EVM
-version) at exact commits, so cargo fetches the right sources automatically — you never
-build them separately unless you are hacking on them:
+**2. Build the two patched tools** (once, then incremental). In the current stack,
+Foundry's manifest pins the revm fork (all twelve crates) and the foundry-core fork
+(compilers with the `@future` EVM version) at exact commits, so cargo fetches the right
+sources automatically — you never build them separately unless you are hacking on them:
 
 ```bash
 # patched solc  ->  solidity/build/solc/solc
@@ -41,7 +56,7 @@ cargo build --manifest-path foundry/Cargo.toml --locked --bin forge --bin anvil
 
 ```bash
 cd contracts
-../foundry/target/debug/forge test      # builds everything, frame contracts included
+../foundry/target/debug/forge test --allow-local-compiler  # trusts the pinned local solc
 ```
 
 The project's default profile sets `evm_version = "@future"`, `experimental = true`, and
@@ -52,6 +67,8 @@ the `setFrameTx` cheatcode. In this toolkit, `@future` executes as **Osaka**, th
 pre-Amsterdam Ethereum profile. That activates the [EIP-7951 P256VERIFY
 precompile](https://eips.ethereum.org/EIPS/eip-7951) at `0x100`, which the WebAuthn
 validators need, without enabling Amsterdam's incompatible node-level state-gas rules.
+The patched FrameTx host also enables this toolkit's explicitly non-normative native
+ML-DSA-44 scheme `0x03`; no EVM precompile or named-fork activation is implied.
 
 For real signed type-`0x06` envelopes, receipts, and state gas, run the patched node:
 
@@ -89,24 +106,28 @@ Prerequisites and the full build order live in [guides/01-build.md](guides/01-bu
 | EIP | Change | Target fork | Inclusion status | Toolkit support |
 |---|---|---|---|---|
 | [EIP-7997](https://forkcast.org/eips/7997) | Deterministic factory contract | [Glamsterdam](https://forkcast.org/upgrade/glamsterdam) | Scheduled (SFI) | Exact factory address/runtime already available in Anvil, plus the `Create2FactoryLib` Solidity helper; fork-gated activation and nonce `1` are not modeled |
-| [EIP-8141](https://forkcast.org/eips/8141) | Frame transactions | [Hegotá](https://forkcast.org/upgrade/hegota) | Considered (CFI) | Compiler, VM, and opt-in Anvil raw-RPC path implemented, including receipts, traces, and fork replay |
-| [EIP-7906](https://forkcast.org/eips/7906) | Transaction assertions via state-diff opcode | [Hegotá](https://forkcast.org/upgrade/hegota) | Proposed (PFI) | Host-supplied EVM fixture only; wire and trace construction pending |
-| [EIP-8250](https://forkcast.org/eips/8250) | Keyed nonces for frame transactions | [Hegotá](https://forkcast.org/upgrade/hegota) | Proposed (PFI) | Host-supplied context only; wire and state integration pending |
-| [EIP-8272](https://forkcast.org/eips/8272) | Recent roots for frame transactions | [Hegotá](https://forkcast.org/upgrade/hegota) | Proposed (PFI) | Host-supplied context only; wire and root verification pending |
+| [EIP-8141](https://eips.ethereum.org/EIPS/eip-8141) | Frame transactions | [Bogota milestone](https://github.com/ethereum/execution-specs/milestone/29) | Draft; [implementation tracker #2829](https://github.com/ethereum/execution-specs/issues/2829) open | Compiler, VM, and opt-in Anvil raw-RPC path aligned and tested against the pinned current master, including receipts, traces, and fork replay |
+| [EIP-7906](https://forkcast.org/eips/7906) | Transaction assertions via state-diff opcode | [Hegotá](https://forkcast.org/upgrade/hegota) | Proposed (PFI) | Host-supplied EVM fixture only; wire and trace construction not implemented |
+| [EIP-8250](https://forkcast.org/eips/8250) | Keyed nonces for frame transactions | [Hegotá](https://forkcast.org/upgrade/hegota) | Proposed (PFI) | Host-supplied context only; wire and state integration not implemented |
+| [EIP-8272](https://forkcast.org/eips/8272) | Recent roots for frame transactions | [Hegotá](https://forkcast.org/upgrade/hegota) | Proposed (PFI) | Host-supplied context only; wire and root verification not implemented |
 | [EIP-7819](https://forkcast.org/eips/7819) | `SETDELEGATE` instruction | [Hegotá](https://forkcast.org/upgrade/hegota) | Proposed (PFI) | Compiler, REVM, and explicit Anvil opt-in implemented with gas, collision, refund, clearing, nonce, and immediate-effect coverage |
 | [EIP-7851](https://forkcast.org/eips/7851) | Code-controlled EOA delegation | [Hegotá](https://forkcast.org/upgrade/hegota) | Proposed (PFI) | Compiler, REVM, and Ethereum-only Anvil opt-in implemented; upstream leaves the opcode TBD, so the toolkit explicitly uses non-normative `0xf7` |
 | [EIP-8151](https://forkcast.org/eips/8151) | Account-code-restricted `ecRecover` | [Hegotá](https://forkcast.org/upgrade/hegota) | Proposed (PFI) | Compiler mutability/formal modeling, REVM, and Ethereum-only Foundry/Anvil opt-in implemented with raw-code, gas, warmth, replay, and access-list coverage |
 
-Fork inclusion statuses are sourced from Forkcast as of 2026-08-16. The local
-[implementation document](spec/EIP8141.md) has a normative body based on pinned EIP-8141
-master (with the `fees`/`limits` envelope and EIP-8037 state-gas budgets) plus the native
-`SIGDATACOPY` split of [EIPs PR #12187](https://github.com/ethereum/EIPs/pull/12187),
-followed by a clearly non-normative appendix for the context-only
-EIP-8250/8272/7906 tooling fixture. The appendix does not define transaction-wire semantics
-for those extensions.
+EIP-8141's Draft status and open Bogota target are sourced from the official EIP and
+[`execution-specs` tracker](https://github.com/ethereum/execution-specs/issues/2829) as of
+2026-08-23; the remaining roadmap rows retain their Forkcast 2026-08-16 snapshot. The local
+[implementation document](spec/EIP8141.md) has a normative body matching pinned official
+master `f767a1e8078e17c9b381a91d35a09492189ede1b`, including the merged native
+`SIGDATACOPY` instruction, plus an explicitly non-normative ML-DSA-44 profile at
+upstream-reserved scheme `0x03`, and a clearly non-normative appendix for the context-only
+EIP-8250/8272/7906 tooling fixture. The
+local ML-DSA allocation is experimental and not portable to upstream clients; the appendix
+does not define transaction-wire semantics for those fixture extensions.
 
-A fresh clone checks out the exact verified compiler, VM, and tooling commits. See
-[Building the toolkit](guides/01-build.md) for the required build order.
+A fresh recursive clone checks out the exact current compiler, VM, and tooling commits. See
+[Building the toolkit](guides/01-build.md) for the required build order and reproducibility
+details.
 
 ## What EIP-8141 changes
 
@@ -115,31 +136,26 @@ contract calls that validate the transaction, approve gas payment, and execute t
 operations. Validity and gas payment become programmable.
 
 The consequence that matters for contract authors: **the protocol verifies native signatures
-before your code runs.** Every `SECP256K1`/`P256` entry is checked against either the
-canonical transaction hash (empty `msg`) or its explicit digest before frame execution
-begins. A native-signature account does not run `ecrecover`; it asks which key signed,
-requires the canonical-hash case when authorizing frames, and applies policy. An
+before your code runs.** Every upstream `SECP256K1`/`P256` entry, and every toolkit-local
+ML-DSA-44 (`0x03`) entry, is checked against either the canonical transaction hash (empty
+`msg`) or its explicit digest before frame execution begins. A native-signature account does
+not repeat the cryptography; it asks which key identity signed, requires the canonical-hash
+case when authorizing frames, and applies policy. An
 `ARBITRARY` entry is different: the protocol checks its structure but leaves its witness for
 contract code to inspect with `SIGDATACOPY`. The WebAuthn examples use that path and call
 P256VERIFY themselves because an authenticator signs WebAuthn data, not the raw transaction
-hash. Solidity accounts share the
-`validate(uint256[] signatureIndices)` ABI (selector `0x25b90494`). The array tells the
-account which entries in `tx.signatures` belong to its policy; canonical signatures commit
-to that routing because the VERIFY frame's calldata is part of the transaction hash. The
-core of a single-owner validator is:
+hash. Ordinary accounts use `validate(uint256 signatureIndex)` (selector `0xce4d01a3`), so
+their VERIFY frame routes exactly one entry from `tx.signatures`. `MultisigAccount` alone
+uses `validate(uint256[] signatureIndices)` (selector `0x25b90494`) because threshold policy
+must aggregate several entries. Canonical signatures commit to either form of routing
+because the VERIFY frame's calldata is part of the transaction hash. The core of a
+single-owner validator is:
 
 ```solidity
-function validate(uint256[] calldata signatureIndices) external {
-    bool ownerSigned;
-    for (uint256 i; i < signatureIndices.length; ++i) {
-        uint256 sigIndex = signatureIndices[i];
-        if (FrameTxLib.sigScheme(sigIndex) == FrameTxLib.SCHEME_ARBITRARY) continue;
-        if (FrameTxLib.signedThisTx(sigIndex) && FrameTxLib.sigSigner(sigIndex) == owner) {
-            ownerSigned = true;
-            break;
-        }
-    }
-    if (!ownerSigned) revert();
+function validate(uint256 signatureIndex) external {
+    if (FrameTxLib.sigScheme(signatureIndex) == FrameTxLib.SCHEME_ARBITRARY) revert();
+    if (!FrameTxLib.signedThisTx(signatureIndex)) revert();
+    if (FrameTxLib.sigSigner(signatureIndex) != owner) revert();
 
     uint256 scope = FrameTxLib.frameAllowedScope(FrameTxLib.currentFrameIndex());
     if (scope == FrameTxLib.SCOPE_NONE) revert();
@@ -149,17 +165,32 @@ function validate(uint256[] calldata signatureIndices) external {
 
 Deriving the current frame's allowed scope lets the same account validate and pay for
 itself (`BOTH`), validate while a paymaster supplies ETH (`EXECUTION`), or pay for another
-already-approved sender (`PAYMENT`). The standalone Yul account implements the same ABI for
-exactly one selected index and treats empty calldata as its ETH-funding path.
+already-approved sender (`PAYMENT`). The standalone Yul account implements the same
+single-index ABI and treats empty calldata as its ETH-funding path. Every current paymaster
+likewise receives one routing index through `sponsorTransaction(uint256)` (selector
+`0x217de4d8`).
+
+The ML-DSA profile is pure FIPS 204 ML-DSA-44 with an empty context over that existing
+32-byte message. Its native field is exactly `2,420-byte signature || 1,312-byte public key`,
+and its signer identity is `low20(keccak256(0x03 || publicKey))`. Upstream reserves `0x03`;
+the local verifier, 50,000-gas placeholder, audit warning, and dedicated contracts are in
+[`contracts/docs/10-pq.md`](contracts/docs/10-pq.md).
+
+Empty-code default accounts remain secp256k1-only. A secp256k1 multisig owner can place its
+canonical entry at index 1, let the multisig count that entry for execution, and let a later
+default-code PAYMENT frame against the same codeless owner reuse it—one envelope entry and
+no second signature. An ML-DSA owner cannot use that default payer path without compatible
+account code or delegation.
 
 ## Contents
 
 | Path | What |
 |---|---|
-| [`solidity/`](https://github.com/leekt/solidity/tree/feat/eip8141-frame-opcodes) | Submodule — compiles the pinned/native surface plus non-normative fixture opcodes |
-| [`revm/`](https://github.com/leekt/revm/tree/feat/native-sigdatacopy) | Submodule — executes the pinned/native surface plus host-supplied fixture context |
-| [`foundry/`](https://github.com/leekt/foundry/tree/feat/frame-tx-txparam-context) | Submodule — `forge` with the frame cheatcodes |
-| [`spec/EIP8141.md`](spec/EIP8141.md) | Master-spec normative overlay (with PR #12187's SIGDATACOPY split) plus a non-normative tooling-fixture appendix |
+| [`solidity/`](solidity/) | Submodule — compiles the EIP-8141 opcode surface plus non-normative fixture opcodes |
+| [`revm/`](revm/) | Submodule — executes the EIP-8141 opcode surface plus host-supplied fixture context |
+| [`foundry-core/`](foundry-core/) | Submodule — teaches Foundry's compiler layer the experimental `@future` EVM target |
+| [`foundry/`](foundry/) | Submodule — `forge` with the frame cheatcodes and opt-in Anvil transaction path |
+| [`spec/EIP8141.md`](spec/EIP8141.md) | Current-master normative overlay, the local non-normative ML-DSA-44 scheme, and a non-normative tooling-fixture appendix |
 | [`contracts/`](contracts/) | The Foundry project: accounts in `src/accounts`, policy in `src/policy`, EIP helper libraries in `src/eips`, **all tests** in `test/` |
 | [`guides/`](guides/) | Build, write, and what does not work yet |
 | [`tools/check-spec-drift.sh`](tools/check-spec-drift.sh) | Detect whether the spec moved |
@@ -189,7 +220,8 @@ REVM while the custom `setFrameTx` cheatcode supplies synthetic transaction cont
 account validation and approval behavior, but not type-`0x06` wire encoding, pool admission,
 nonce transitions, or eventual ETH charging and refunds. Native P256 fixtures supply
 already-verified scheme/signer/message metadata and therefore do not cryptographically verify
-the envelope signature. WebAuthn fixtures do construct a real assertion and execute
+the envelope signature; native ML-DSA contract fixtures have the same boundary. WebAuthn
+fixtures do construct a real assertion and execute
 P256VERIFY, although their canonical transaction challenge still comes from synthetic
 `setFrameTx` context.
 
@@ -209,7 +241,7 @@ path):
 
 ```bash
 cd contracts
-../foundry/target/debug/forge test
+../foundry/target/debug/forge test --allow-local-compiler
 ```
 
 To add an account:
@@ -227,17 +259,18 @@ To add an account:
 3. Run the focused test:
 
 ```bash
-../foundry/target/debug/forge test --match-contract MyAccountTest -vvv
+../foundry/target/debug/forge test --allow-local-compiler --match-contract MyAccountTest -vvv
 ```
 
 Paymaster implementations have the parallel
 [`contracts/test/PaymasterTestSuite.sol`](contracts/test/PaymasterTestSuite.sol). Its
-four hooks provide the deployed paymaster, trusted signatures, index-selecting calldata,
-and accepted max cost; inherited cases require sponsorship of all seven account targets:
+four hooks provide the deployed paymaster, one trusted signature, scalar index-selecting
+calldata, and accepted max cost; inherited cases require sponsorship of all eight account targets:
 `OwnerAccount`, `MultisigAccount`, `SessionKeyAccount` through its owner, the portable and
-builtin Yul accounts, `P256Account`, and `WebAuthnAccount`. Every case uses one shared,
-shifted signature envelope. A paymaster with no signature authorization returns an empty
-signature array; sender-specific setup can override `_preparePaymasterForAccount(address)`.
+builtin Yul accounts, `P256Account`, `WebAuthnAccount`, and `MLDSAAccount`. Every case uses
+one shared, shifted signature envelope. Sender-specific signature policies can override
+`_preparePaymasterForAccount(address)`; a paymaster without signature authorization needs a
+policy-specific suite.
 
 ### Full Anvil transactions
 
@@ -254,14 +287,17 @@ Use `--hardfork osaka` instead of `prague` when the validation path executes
 `WebAuthnAccount` or `WebAuthnPaymaster`; both call the EIP-7951 precompile at `0x100`.
 The Anvil suite includes a raw native-P256 transaction that rejects a corrupted public key,
 then mines the valid type-`0x06` envelope through `P256Account` and checks its payer, nonce,
-and SENDER-frame effects. There is currently no equivalent Anvil WebAuthn end-to-end test.
+and SENDER-frame effects. It also submits a real 3,732-byte ML-DSA-44 entry through the
+production `MLDSAAccount`, rejects a corrupt signature at admission, and checks payer debit,
+nonce, and SENDER effects. A second raw case proves the multisig-owner/index-1 default-payer
+reuse path. There is currently no equivalent Anvil WebAuthn end-to-end test.
 
 Anvil accepts frame transactions only as signed raw bytes through `eth_sendRawTransaction`.
 Object-form `eth_sendTransaction` and `eth_call` do not construct them, and `cast send` does
 not yet have a frame-transaction builder. The transaction types and signing examples live in:
 
-- `foundry/crates/primitives/src/transaction/frame.rs`
-- `foundry/crates/anvil/tests/it/frame_tx.rs`
+- [`foundry/crates/primitives/src/transaction/frame.rs`](foundry/crates/primitives/src/transaction/frame.rs)
+- [`foundry/crates/anvil/tests/it/frame_tx.rs`](foundry/crates/anvil/tests/it/frame_tx.rs)
 
 Run the existing end-to-end transaction suite without starting a separate node:
 
@@ -276,13 +312,15 @@ features.
 
 ## Guides
 
-1. **[Building](guides/01-build.md)** — the three-submodule build order and artifact generation.
+1. **[Building](guides/01-build.md)** — the four-submodule build order and artifact generation.
 2. **[Writing accounts](guides/02-writing-accounts.md)** — the opcodes, the parameter
    tables, the `APPROVE` scope rules, and the constraints that will bite you.
 3. **[Limitations](guides/03-limitations.md)** — what is not implemented and where this
    toolkit knowingly diverges from the spec. **Read this before planning work.**
 4. **[Foundry and revm](guides/04-foundry.md)** — the patched Forge, Anvil activation and
    support boundaries, receipts, tracing, and replay.
+5. **[Migration](guides/05-migration.md)** — phased ERC-4337 and EOA migration plans,
+   rollback controls, nonce/funding boundaries, and counterfactual-address constraints.
 
 ## Accounts and paymasters
 
@@ -297,14 +335,17 @@ All under [`contracts/src/accounts`](contracts/src/accounts), each with notes in
 | `SessionKeyAccount.sol` | Account | Cross-frame constraints for a delegated key, with expiry via the expiry verifier frame |
 | `P256Account.sol` | Account | Native protocol-verified P256 metadata, `keccak256(qx || qy)[12:]` signer identity, and self-call key rotation |
 | `WebAuthnAccount.sol` | Account | A strict WebAuthn assertion carried as an `ARBITRARY` witness and verified at precompile `0x100` |
+| `MLDSAAccount.sol` | Account | Exact toolkit-local native ML-DSA-44 scheme `0x03`, domain-separated signer identity, and self-call key rotation |
 | `SponsoringPaymaster.sol` | Paymaster | Third-party sponsorship authorized by a protocol-verified secp256k1 signer |
 | `P256Paymaster.sol` | Paymaster | Third-party sponsorship authorized by a protocol-verified native P256 signer |
 | `WebAuthnPaymaster.sol` | Paymaster | Third-party sponsorship authorized by a strict WebAuthn assertion |
+| `MLDSAPaymaster.sol` | Paymaster | Third-party sponsorship authorized by the exact toolkit-local native ML-DSA-44 scheme |
 
 [`contracts/docs/09-p256-and-webauthn.md`](contracts/docs/09-p256-and-webauthn.md)
 documents the two P256 paths, their APIs, exact WebAuthn witness profile, public-mempool
-status, and test boundaries. `contracts/docs/01-eoa-default-code.md` covers the no-contract
-EOA path.
+status, and test boundaries. [`contracts/docs/10-pq.md`](contracts/docs/10-pq.md) documents
+the non-normative ML-DSA wire, gas, contracts, generic native-policy support, key lifecycle,
+and audit boundary. `contracts/docs/01-eoa-default-code.md` covers the no-contract EOA path.
 
 ## Two things that will trip you up
 
@@ -339,17 +380,20 @@ tools/check-spec-drift.sh
 
 Fetches the exact upstream source pin and current `ethereum/EIPs` master, then exits
 non-zero and prints their diff if upstream moved. It deliberately does not compare the
-local native-SIGDATACOPY overlay or tooling appendix to upstream as though they should be
-identical.
+local explanatory notes, experimental ML-DSA-44 scheme, or tooling appendix to upstream as
+though they should be identical.
 [VERSIONS.md](VERSIONS.md) maps each spec area to the code implementing it, so you can go
 straight to what a given change affects.
 
 ## Status
 
 Proof of concept. Compiler support, synthetic Forge execution, and the opt-in Anvil raw-RPC
-path are implemented in the published toolkit commits, including nested receipts, parity traces,
-canonical raw-byte fork replay, and expiry-verifier activation. Keyed-nonce/recent-root/POST_TX
+path exist in the current pinned toolkit stack, including nested receipts, parity traces,
+canonical raw-byte fork replay, and expiry-verifier activation. The
+`feat/eip8141-current-spec` heads for Solidity, revm, foundry-core, and Foundry are pushed and
+reproducible from a fresh recursive clone. Keyed-nonce/recent-root/POST_TX
 wire and state integration, public-pool policy, gossip, and Amsterdam state-gas compatibility
-are not implemented. Experimental EIP-7819, EIP-7851, and EIP-8151 compiler/VM and opt-in
+are not implemented. Toolkit-local ML-DSA-44 uses an upstream-reserved scheme value and is
+experimental and unaudited. Experimental EIP-7819, EIP-7851, and EIP-8151 compiler/VM and opt-in
 Anvil support is also present. Non-Ethereum execution profiles reject frame envelopes and mask
 the Ethereum-only proposal flags. Not independently audited; not for production.

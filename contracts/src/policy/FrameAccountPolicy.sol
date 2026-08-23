@@ -8,16 +8,18 @@ pragma solidity ^0.8.24;
 ///
 /// EIP-8141 splits an account cleanly in two:
 ///
-///  1. Before any frame runs, the protocol verifies every `SECP256K1`/`P256`
-///     signature against either the canonical transaction hash (empty `msg`) or
-///     the entry's explicit digest. The account never touches elliptic curves.
+///  1. Before any frame runs, the protocol verifies every native signature
+///     (`SECP256K1`, `P256`, or toolkit-local `ML-DSA-44`) against either the
+///     canonical transaction hash (empty `msg`) or the entry's explicit digest.
+///     The account never performs the underlying cryptography.
 ///  2. The account is left with a policy question: given the set of keys that
 ///     provably signed, and the frames about to execute, should this transaction
 ///     be approved?
 ///
 /// (2) is ordinary Solidity. It is where the bugs live, and it is what this
-/// library contains. The frame glue that feeds it receives signature indices in
-/// the VERIFY frame's signed calldata, resolves only those selected entries with
+/// library contains. Ordinary frame glue receives one signature index, while
+/// multisig glue receives an index array, in the VERIFY frame's signed calldata.
+/// It resolves only the selected entry or entries with
 /// `sigparam`, inspects frames with `frameparam`, and approves with `approvetx`.
 /// Signature indices stay in that glue layer; this opcode-free policy receives
 /// the already-selected canonical signers.

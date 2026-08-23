@@ -32,7 +32,7 @@ interface IFrameVm {
     }
 
     struct FrameTxSignature {
-        /// 0 ARBITRARY, 1 SECP256K1, 2 P256.
+        /// 0 ARBITRARY, 1 SECP256K1, 2 P256, 3 ML-DSA-44.
         uint8 scheme;
         /// Host-supplied resolved signer. Ignored for ARBITRARY.
         address signer;
@@ -253,6 +253,16 @@ abstract contract FrameTest is Test {
         return
             IFrameVm.FrameTxSignature({
                 scheme: 2, signer: signer, msgHash: bytes32(0), signature: ""
+            });
+    }
+
+    /// Synthetic native ML-DSA-44 entry modeling the canonical-hash case.
+    /// The host fixture supplies already-verified signer metadata; raw native
+    /// signature bytes remain opaque to account bytecode.
+    function mldsaSig(address signer) internal pure returns (IFrameVm.FrameTxSignature memory) {
+        return
+            IFrameVm.FrameTxSignature({
+                scheme: 3, signer: signer, msgHash: bytes32(0), signature: ""
             });
     }
 

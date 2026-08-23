@@ -2,16 +2,16 @@
 pragma solidity ^0.8.30;
 
 import {FrameTxLib} from "../frame/FrameTxLib.sol";
-import {IFrameAccount} from "./IFrameAccount.sol";
+import {IMultisigFrameAccount} from "./IMultisigFrameAccount.sol";
 
 /// @title MultisigAccount - a k-of-n multisig smart account for EIP-8141 frame transactions
 /// @author taek <leekt216@gmail.com>
 /// @notice The whole account is one validation function. There is no `execute()`, no
 ///         `UserOperation` struct, no signature blob, and no `ecrecover`: the protocol has
-///         already verified every secp256k1/P256 signature against its selected message.
+///         already verified every native signature against its selected message.
 ///         This contract admits only entries over the canonical transaction hash, asks
 ///         *which keys signed*, and decides whether it trusts enough of them.
-contract MultisigAccount is IFrameAccount {
+contract MultisigAccount is IMultisigFrameAccount {
     mapping(address => bool) public isOwner;
     uint256 public threshold;
 
@@ -48,9 +48,14 @@ contract MultisigAccount is IFrameAccount {
             uint256 sigIndex = signatureIndices[i];
             // Read the scheme BEFORE the signer: asking for resolved_signer of an ARBITRARY
             // entry is an exceptional halt, not a revert, so it would burn the frame's gas
-            // and invalidate the whole transaction. Skipping a selected foreign entry
-            // keeps mixed authentication schemes composable.
-            if (FrameTxLib.sigScheme(sigIndex) != FrameTxLib.SCHEME_SECP256K1) continue;
+            // and invalidate the whole transaction. Native secp256k1, P256, and ML-DSA-44
+            // entries all expose a protocol-verified address identity. Unknown and
+            // contract-interpreted entries are skipped.
+            uint256 scheme = FrameTxLib.sigScheme(sigIndex);
+            if (
+                scheme != FrameTxLib.SCHEME_SECP256K1 && scheme != FrameTxLib.SCHEME_P256
+                    && scheme != FrameTxLib.SCHEME_ML_DSA_44
+            ) continue;
 
             // `signedThisTx` is `sigMsg(sigIndex) == 0`: signed over compute_sig_hash(tx), i.e. over
             // THIS transaction: its chain id, nonce, sender and every frame. A non-zero msg

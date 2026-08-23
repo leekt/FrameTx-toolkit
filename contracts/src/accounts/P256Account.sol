@@ -8,7 +8,7 @@ import {IFrameAccount} from "./IFrameAccount.sol";
 /// @notice A single-key EIP-8141 account backed by a secp256r1 (P256) key.
 /// @dev The protocol verifies the P256 signature and public key before frame
 ///      execution. This account stores only the key-derived signer address and
-///      applies policy to the explicitly selected signature entries.
+///      applies policy to the explicitly selected signature entry.
 contract P256Account is IFrameAccount {
     /// @notice `keccak256(qx || qy)[12:]` for the currently authorised key.
     address public p256Signer;
@@ -25,28 +25,18 @@ contract P256Account is IFrameAccount {
         emit P256KeyChanged(p256Signer);
     }
 
-    /// @notice VERIFY-frame entry point using the shared account ABI.
-    /// @param signatureIndices Entries assigned to this account by the signed
-    ///        frame transaction.
-    function validate(uint256[] calldata signatureIndices) external override {
-        address trustedSigner = p256Signer;
-        bool trustedSignature;
-
-        for (uint256 i; i < signatureIndices.length; ++i) {
-            uint256 sigIndex = signatureIndices[i];
-
-            // Only protocol-validated P256 entries belong to this policy.
-            // Checking the scheme first also avoids asking for a signer on an
-            // ARBITRARY entry, which would halt exceptionally.
-            if (FrameTxLib.sigScheme(sigIndex) != FrameTxLib.SCHEME_P256) continue;
-            if (!FrameTxLib.signedThisTx(sigIndex)) continue;
-            if (FrameTxLib.sigSigner(sigIndex) == trustedSigner) {
-                trustedSignature = true;
-                break;
-            }
+    /// @notice VERIFY-frame entry point using the single-index account ABI.
+    /// @param signatureIndex Entry assigned to this account by the signed frame
+    ///        transaction.
+    function validate(uint256 signatureIndex) external override {
+        // Only protocol-validated P256 entries belong to this policy. Checking
+        // the scheme first also avoids asking for a signer on an ARBITRARY
+        // entry, which would halt exceptionally.
+        if (FrameTxLib.sigScheme(signatureIndex) != FrameTxLib.SCHEME_P256) {
+            revert NoTrustedSignature();
         }
-
-        if (!trustedSignature) revert NoTrustedSignature();
+        if (!FrameTxLib.signedThisTx(signatureIndex)) revert NoTrustedSignature();
+        if (FrameTxLib.sigSigner(signatureIndex) != p256Signer) revert NoTrustedSignature();
 
         // The same account can self-relay, be sponsored, or pay for another
         // sender. The VERIFY frame's signed flags select the requested role.

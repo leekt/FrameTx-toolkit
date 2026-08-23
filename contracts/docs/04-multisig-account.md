@@ -1,21 +1,25 @@
 # 04 — k-of-n multisig account (Solidity)
 
 `MultisigAccount` is a k-of-n EIP-8141 account with no `ecrecover`, packed signature blob,
-or `execute()` dispatcher. It implements the common account entry point:
+or `execute()` dispatcher. It implements the multisig-specific `IMultisigFrameAccount`
+entry point:
 
 ```solidity
 function validate(uint256[] calldata signatureIndices) external;
 ```
 
 The selector is `0x25b90494`. Each element selects an entry in `tx.signatures` for this
-multisig to consider. The contract does not scan unselected envelope entries.
+multisig to consider. The contract does not scan unselected envelope entries. This is the
+only toolkit account that uses an index array; ordinary accounts implement
+`validate(uint256)` with selector `0xce4d01a3`.
 
 ## What it does
 
-Before any frame runs, the protocol validates every `SECP256K1` and `P256` entry against its
-selected message. The account then applies policy to the selected indices:
+Before any frame runs, the protocol validates every supported native entry against its
+selected message: `SECP256K1`, `P256`, and this toolkit's experimental ML-DSA-44 scheme
+`0x03`. The account then applies policy to the selected indices:
 
-1. Require `SECP256K1`; other selected schemes are skipped.
+1. Require one of those three native schemes; `ARBITRARY` and unknown schemes are skipped.
 2. Require an empty `msg`, which means the signer authorized `compute_sig_hash(tx)` and
    therefore this complete frame transaction.
 3. Require `resolved_signer` to be a stored owner.
@@ -27,6 +31,12 @@ Reading the scheme before the signer matters. `ARBITRARY` entries do not have a
 `resolved_signer`, and asking for one exceptional-halts. Skipping a selected foreign entry
 keeps mixed authentication schemes composable, while omitting foreign and paymaster entries
 from `signatureIndices` avoids inspecting them at all.
+
+The common address policy is intentional. A P256 owner is stored as
+`low20(keccak256(qx || qy))`; an ML-DSA-44 owner is stored as
+`low20(keccak256(0x03 || publicKey))`. A threshold may mix those identities with ordinary
+secp256k1 owners without putting raw key or signature bytes in contract calldata. The exact
+toolkit-local post-quantum profile is in [`10-pq.md`](10-pq.md).
 
 The empty-`msg` check is equally important. A protocol-valid signature over an explicit
 digest does not commit to this sender, nonce, fees, frame list, or index routing and must not
@@ -107,6 +117,21 @@ with this storage-backed implementation: reading `isOwner` and `threshold` while
 storage reads outside `tx.sender`. Public-pool sponsorship needs a paymaster policy that
 satisfies those rules.
 
+#### Reusing a secp256k1 owner as the default payer
+
+A codeless secp256k1 owner can count toward this account's execution threshold and pay for
+the transaction with one signature entry. Put that owner's empty-`msg` `SECP256K1` entry at
+index `1`, with an explicit signer equal to the codeless owner. Include `1` in this
+multisig's selected array, respecting ascending signer-address order, then place a later
+PAYMENT-only VERIFY frame against that signer. Empty-code default validation hard-selects
+index `1` for PAYMENT and reuses the same canonical `v || r || s` bytes; no second signature
+is required.
+
+An ML-DSA-44 owner may count toward this multisig, but cannot replace that default payer
+entry. The protocol's empty-code account remains secp256k1-only, so a post-quantum payer
+needs compatible account code or delegation. See
+[`01-eoa-default-code.md`](01-eoa-default-code.md#reusing-index-1-with-a-multisig-owner).
+
 ## Where did `execute()` go?
 
 A `SENDER` frame is the execution. The protocol calls each target with
@@ -114,7 +139,7 @@ A `SENDER` frame is the execution. The protocol calls each target with
 There is no account-side operation decoder or batch dispatcher.
 
 Compared with ERC-4337, the protocol supplies structured signature entries, performs the
-elliptic-curve verification, binds signatures to the transaction, manages the sender nonce,
+native cryptographic verification, binds signatures to the transaction, manages the sender nonce,
 and handles payer collection through `APPROVE`. The contract is left with the wallet policy:
 which selected verified signers are owners, are they distinct, and do enough of them agree?
 
@@ -154,8 +179,10 @@ Selectors:
 frame opcodes in patched revm. The inherited matrix covers shifted routing, all three
 approval roles, exact scopes, and funding. Multisig-specific cases cover threshold
 boundaries, sorted deduplication, selected versus unselected entries, foreign and arbitrary
-entries, explicit digests, and scheme filtering. Raw-RPC frame-transaction behavior is
-tested separately in Anvil.
+entries, explicit digests, and mixed secp256k1/P256/ML-DSA-44 scheme filtering. Raw-RPC
+frame-transaction behavior is tested separately in Anvil. One raw regression executes the
+production ML-DSA account path, and another proves that signature index 1 can count toward
+this multisig and be reused by its codeless secp256k1 owner as payer.
 
 ## Points worth carrying into production
 
@@ -163,8 +190,10 @@ tested separately in Anvil.
   cap. Add a policy limit if predictable cost matters.
 - Duplicate indices cannot count the same owner twice because the second signer is not
   strictly greater than the first.
-- A selected `P256` entry is deliberately skipped by this example, even though the protocol
-  verifies it. Supporting P256 multisig owners is a policy change, not a cryptographic
-  implementation task.
+- Only the three explicitly supported native schemes count. `ARBITRARY` entries and any
+  future native scheme remain skipped until the policy is deliberately updated.
+- Two ML-DSA-44 signatures consume the current 100,000-gas public validation limit before
+  this loop runs. A hybrid ML-DSA-44 plus secp256k1 threshold leaves at most 47,200 gas for
+  validation-frame execution; see [`10-pq.md`](10-pq.md#gas-and-transaction-size).
 - The contract relies on `APPROVE`'s target and scope checks rather than a separate
   EntryPoint caller check.

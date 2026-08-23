@@ -1,52 +1,47 @@
 # 03 — Single-owner smart account (Solidity)
 
 `OwnerAccount` is the canonical EIP-8141 starting point: one owner key in storage, no
-`ecrecover`, and no `execute()` wrapper. It implements the shared account ABI:
+`ecrecover`, and no `execute()` wrapper. It implements the ordinary single-index account ABI:
 
 ```solidity
-function validate(uint256[] calldata signatureIndices) external;
+function validate(uint256 signatureIndex) external;
 ```
 
-The selector is `0x25b90494`. The VERIFY frame passes the indices of the entries in
-`tx.signatures` that this account should inspect. The account loops over only those selected
-entries and succeeds when at least one is a protocol-validated signature by `owner` over the
+The selector is `0xce4d01a3`. The VERIFY frame passes one entry in `tx.signatures` for this
+account to inspect. That entry must be a protocol-validated signature by `owner` over the
 canonical transaction hash.
 
 ```solidity
-bool ownerSigned;
-for (uint256 i; i < signatureIndices.length; ++i) {
-    uint256 sigIndex = signatureIndices[i];
-    if (FrameTxLib.sigScheme(sigIndex) == FrameTxLib.SCHEME_ARBITRARY) continue;
-    if (!FrameTxLib.signedThisTx(sigIndex)) continue;
-    if (FrameTxLib.sigSigner(sigIndex) == owner) {
-        ownerSigned = true;
-        break;
-    }
+if (FrameTxLib.sigScheme(signatureIndex) == FrameTxLib.SCHEME_ARBITRARY) {
+    revert NoTrustedSignature();
 }
-if (!ownerSigned) revert NoTrustedSignature();
+if (!FrameTxLib.signedThisTx(signatureIndex)) revert NoTrustedSignature();
+if (FrameTxLib.sigSigner(signatureIndex) != owner) revert NoTrustedSignature();
 
 uint256 scope = FrameTxLib.frameAllowedScope(FrameTxLib.currentFrameIndex());
 if (scope == FrameTxLib.SCOPE_NONE) revert NothingToApprove();
 FrameTxLib.approve(scope);
 ```
 
-The protocol verified every `SECP256K1` or `P256` signature before any frame ran. The
-contract is deciding which verified key it trusts and whether that key signed
-`compute_sig_hash(tx)`; it is not repeating the cryptography. `ARBITRARY` entries are skipped
-before reading `resolved_signer`, because that field does not exist for that scheme.
+The protocol verified every supported native signature before any frame ran: `SECP256K1`,
+`P256`, and this toolkit's experimental ML-DSA-44 scheme `0x03`. The contract is deciding
+which verified key identity it trusts and whether that key signed `compute_sig_hash(tx)`; it
+is not repeating the cryptography. `ARBITRARY` entries are rejected before reading
+`resolved_signer`, because that field does not exist for that scheme.
 
-## Why indices are frame input
+## Why the index is frame input
 
-Several accounts and a paymaster may share one signature envelope. Passing indices in the
-VERIFY frame routes the relevant entries without requiring every account to scan the whole
-list or assume its signature is entry zero. An owner signature can be at any envelope
-position, but it counts only if its index appears in `signatureIndices`. An empty list, a
-list containing only foreign entries, or an unselected owner signature does not authorize.
+Several accounts and a paymaster may share one signature envelope. Passing one index in an
+ordinary account's VERIFY frame routes its relevant entry without requiring the account to
+scan the envelope or assume its signature is entry zero. An owner signature can be at any
+envelope position, but it counts only when that position is the supplied `signatureIndex`.
+A foreign selected entry or an unselected owner signature does not authorize.
 
 This routing is not unsigned metadata. VERIFY-frame calldata is part of the frame list, and
 the frame list is part of the canonical transaction signature hash. Every accepted
-empty-`msg` signature therefore commits to the index array. An out-of-range selected index
-fails when `SIGPARAM` applies its bounds check.
+empty-`msg` signature therefore commits to the selected index. An out-of-range index fails
+when `SIGPARAM` applies its bounds check. Multisig is the deliberate exception: its threshold
+entry point receives a signed index array.
 
 ## One validator, three roles
 
@@ -68,14 +63,14 @@ come after the sender's execution validator.
 
 | # | Mode | Flags | Target | Data | Purpose |
 |---|---|---|---|---|---|
-| 0 | `VERIFY` | `0x3` | account or null | `validate([ownerSigIndex])` | Authenticate, grant execution, fund gas |
+| 0 | `VERIFY` | `0x3` | account or null | `validate(ownerSigIndex)` | Authenticate, grant execution, fund gas |
 | 1… | `SENDER` | operation flags | user-selected target | operation calldata | Execute with `caller == tx.sender == account` |
 
 ### Externally sponsored transaction
 
 | # | Mode | Flags | Target | Data | Purpose |
 |---|---|---|---|---|---|
-| 0 | `VERIFY` | `0x2` | account or null | `validate([ownerSigIndex])` | Authenticate and grant execution only |
+| 0 | `VERIFY` | `0x2` | account or null | `validate(ownerSigIndex)` | Authenticate and grant execution only |
 | 1 | `VERIFY` | `0x1` | paymaster | paymaster-specific | Approve payment after execution is approved |
 | 2… | `SENDER` | operation flags | user-selected target | operation calldata | User operation |
 
@@ -84,7 +79,7 @@ come after the sender's execution validator.
 | # | Mode | Flags | Target | Data | Purpose |
 |---|---|---|---|---|---|
 | 0 | `VERIFY` | `0x2` | `tx.sender` account | sender-specific | Sender authenticates and grants execution |
-| 1 | `VERIFY` | `0x1` | this funded account | `validate([payerOwnerSigIndex])` | Payer owner authenticates and grants payment |
+| 1 | `VERIFY` | `0x1` | this funded account | `validate(payerOwnerSigIndex)` | Payer owner authenticates and grants payment |
 | 2… | `SENDER` | operation flags | user-selected target | operation calldata | Other sender's operation |
 
 The payer owner's canonical signature covers the other sender, fees, frames, and selected
@@ -98,11 +93,11 @@ rules for public-pool sponsorship.
 
 ## Signature requirements
 
-For each selected owner entry:
+For the selected owner entry:
 
 | Field | Requirement |
 |---|---|
-| `scheme` | `SECP256K1` or `P256`; `ARBITRARY` is ignored |
+| `scheme` | Any supported native scheme: `SECP256K1`, `P256`, or toolkit-local `ML_DSA_44`; `ARBITRARY` is rejected |
 | `signer` | resolves to the stored owner address |
 | `msg` | empty, so the protocol checked `compute_sig_hash(tx)` |
 | `signature` | valid for the selected scheme; protocol-checked before frame execution |
@@ -111,6 +106,11 @@ An empty `signer` resolves to `tx.sender`. For a contract account whose owner is
 key, the envelope should therefore carry the owner address explicitly. A non-empty 32-byte
 `msg` is a valid signature over an explicit digest, but it does not commit to this frame
 transaction and is deliberately ignored.
+
+For an ML-DSA-44 owner, configure `owner` as
+`low20(keccak256(0x03 || publicKey))`, not as the public key or an unrelated EOA address.
+The non-normative wire, gas, audit warning, and dedicated scheme-enforcing account are
+documented in [`10-pq.md`](10-pq.md).
 
 ## No `execute()` function
 
@@ -134,8 +134,8 @@ to hold the full `max_cost` when `APPROVE` executes.
 
 `frameContext()` is a read-only demonstration, not part of validation. It reports the
 canonical signature hash, current frame index, flags, mode, and signer at envelope index
-zero. The validator itself does not use that hardcoded index; it consumes the indices passed
-to `validate(uint256[])`.
+zero. The validator itself does not use that hardcoded index; it consumes the index passed to
+`validate(uint256)`.
 
 ## Compiling
 
@@ -152,7 +152,7 @@ Selectors:
 
 | Selector | Function |
 |---|---|
-| `0x25b90494` | `validate(uint256[])` |
+| `0xce4d01a3` | `validate(uint256)` |
 | `0x8da5cb5b` | `owner()` |
 | `0x13af4035` | `setOwner(address)` |
 | `0xde3abbac` | `frameContext()` |

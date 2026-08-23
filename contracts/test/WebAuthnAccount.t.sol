@@ -154,27 +154,27 @@ contract WebAuthnAccountTest is AccountTestSuite {
         );
     }
 
-    function _context(IFrameVm.FrameTxSignature memory signature, uint256[] memory indices)
+    function _context(IFrameVm.FrameTxSignature memory signature, uint256 signatureIndex)
         internal
         view
         returns (IFrameVm.FrameTx memory ctx)
     {
         ctx = verifyContext(account, SCOPE_BOTH, SUITE_CHALLENGE);
-        ctx.frames[0].data = validationCalldata(indices);
+        ctx.frames[0].data = validationCalldata(signatureIndex);
         ctx.signatures = new IFrameVm.FrameTxSignature[](1);
         ctx.signatures[0] = signature;
     }
 
     function _assertInvalid(bytes memory witness, string memory reason) internal {
         assertRefusesFrame(
-            account, _context(_entry(SCHEME_ARBITRARY, bytes32(0), witness), selected(0)), reason
+            account, _context(_entry(SCHEME_ARBITRARY, bytes32(0), witness), 0), reason
         );
     }
 
     function test_realWebAuthnAssertionApproves() public {
         assertApprovesFrame(
             account,
-            _context(_entry(SCHEME_ARBITRARY, bytes32(0), _validAssertion()), selected(0)),
+            _context(_entry(SCHEME_ARBITRARY, bytes32(0), _validAssertion()), 0),
             "a real assertion from the configured credential must approve"
         );
     }
@@ -205,17 +205,23 @@ contract WebAuthnAccountTest is AccountTestSuite {
     function test_nativeP256EntryCannotMasqueradeAsWebAuthn() public {
         assertRefusesFrame(
             account,
-            _context(_entry(SCHEME_P256, bytes32(0), ""), selected(0)),
+            _context(_entry(SCHEME_P256, bytes32(0), ""), 0),
             "resolved P256 metadata is not a WebAuthn assertion"
+        );
+    }
+
+    function test_nativeMLDSAEntryCannotMasqueradeAsWebAuthn() public {
+        assertRefusesFrame(
+            account,
+            _context(mldsaSig(address(0xA44)), 0),
+            "resolved ML-DSA-44 metadata is not a WebAuthn assertion"
         );
     }
 
     function test_explicitMessageArbitraryEntryIsRefused() public {
         assertRefusesFrame(
             account,
-            _context(
-                _entry(SCHEME_ARBITRARY, keccak256("explicit"), _validAssertion()), selected(0)
-            ),
+            _context(_entry(SCHEME_ARBITRARY, keccak256("explicit"), _validAssertion()), 0),
             "the witness must be elided from and challenged by the canonical signature hash"
         );
     }
@@ -346,7 +352,7 @@ contract WebAuthnAccountTest is AccountTestSuite {
         );
         assertApprovesFrame(
             account,
-            _context(_entry(SCHEME_ARBITRARY, bytes32(0), assertion), selected(0)),
+            _context(_entry(SCHEME_ARBITRARY, bytes32(0), assertion), 0),
             "BE and BS are valid assertion flags"
         );
     }
@@ -449,14 +455,13 @@ contract WebAuthnAccountTest is AccountTestSuite {
         _assertInvalid(abi.encode(r, s, authData, clientData), "authenticator data length");
     }
 
-    function test_exactlyOneSignatureMustBeSelected() public {
+    function test_legacyArraySignatureSelectionAbiIsRefused() public {
         IFrameVm.FrameTxSignature memory entry =
             _entry(SCHEME_ARBITRARY, bytes32(0), _validAssertion());
-        assertRefusesFrame(
-            account,
-            _context(entry, selected(0, 0)),
-            "duplicate assertion routing must not be accepted"
-        );
+        IFrameVm.FrameTx memory ctx = _context(entry, 0);
+        uint256[] memory legacyIndices = selected(0);
+        ctx.frames[0].data = abi.encodeWithSignature("validate(uint256[])", legacyIndices);
+        assertRefusesFrame(account, ctx, "the removed dynamic-array ABI must not authorize");
     }
 
     function test_userVerificationCanBeConfiguredOptional() public {
@@ -467,7 +472,7 @@ contract WebAuthnAccountTest is AccountTestSuite {
             CREDENTIAL_KEY, SUITE_CHALLENGE, expectedRpIdHash, 0x01, ORIGIN, "webauthn.get", false
         );
         IFrameVm.FrameTx memory ctx = verifyContext(relaxedAccount, SCOPE_BOTH, SUITE_CHALLENGE);
-        ctx.frames[0].data = validationCalldata(selected(0));
+        ctx.frames[0].data = validationCalldata(0);
         ctx.signatures = new IFrameVm.FrameTxSignature[](1);
         ctx.signatures[0] = _entry(SCHEME_ARBITRARY, bytes32(0), witness);
         assertApprovesFrame(

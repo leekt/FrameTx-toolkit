@@ -12,6 +12,7 @@ import {P256Account} from "../src/accounts/P256Account.sol";
 contract P256AccountTest is AccountTestSuite {
     uint8 private constant SCHEME_SECP256K1 = 1;
     uint8 private constant SCHEME_P256 = 2;
+    uint8 private constant SCHEME_ML_DSA_44 = 3;
     uint256 private constant P256_KEY =
         0x234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1;
     uint256 private constant OTHER_P256_KEY =
@@ -81,11 +82,11 @@ contract P256AccountTest is AccountTestSuite {
         uint8 scheme,
         address claimedSigner,
         bytes32 msgHash,
-        uint256[] memory indices,
+        uint256 signatureIndex,
         uint64 scope
     ) internal view returns (IFrameVm.FrameTx memory ctx) {
         ctx = verifyContext(account, scope, bytes32(uint256(0x8141)));
-        ctx.frames[0].data = validationCalldata(indices);
+        ctx.frames[0].data = validationCalldata(signatureIndex);
         ctx.signatures = new IFrameVm.FrameTxSignature[](1);
         ctx.signatures[0] = _signature(scheme, claimedSigner, msgHash);
     }
@@ -101,15 +102,23 @@ contract P256AccountTest is AccountTestSuite {
     function test_secp256k1EntryFromSameAddressIsRefused() public {
         assertRefusesFrame(
             account,
-            _context(SCHEME_SECP256K1, signer, bytes32(0), selected(0), SCOPE_BOTH),
+            _context(SCHEME_SECP256K1, signer, bytes32(0), 0, SCOPE_BOTH),
             "this policy must require the P256 protocol scheme"
+        );
+    }
+
+    function test_mldsaEntryFromSameAddressIsRefused() public {
+        assertRefusesFrame(
+            account,
+            _context(SCHEME_ML_DSA_44, signer, bytes32(0), 0, SCOPE_BOTH),
+            "an ML-DSA-44 identity must not masquerade as the configured P256 key"
         );
     }
 
     function test_explicitDigestP256EntryIsRefused() public {
         assertRefusesFrame(
             account,
-            _context(SCHEME_P256, signer, keccak256("unrelated"), selected(0), SCOPE_BOTH),
+            _context(SCHEME_P256, signer, keccak256("unrelated"), 0, SCOPE_BOTH),
             "an explicit digest does not bind the frame transaction"
         );
     }
@@ -119,7 +128,7 @@ contract P256AccountTest is AccountTestSuite {
         address otherSigner = _signer(bytes32(otherX), bytes32(otherY));
         assertRefusesFrame(
             account,
-            _context(SCHEME_P256, otherSigner, bytes32(0), selected(0), SCOPE_BOTH),
+            _context(SCHEME_P256, otherSigner, bytes32(0), 0, SCOPE_BOTH),
             "only the configured P256 key may authorise"
         );
     }
@@ -142,12 +151,12 @@ contract P256AccountTest is AccountTestSuite {
 
         assertRefusesFrame(
             account,
-            _context(SCHEME_P256, signer, bytes32(0), selected(0), SCOPE_BOTH),
+            _context(SCHEME_P256, signer, bytes32(0), 0, SCOPE_BOTH),
             "the old key must stop authorising immediately"
         );
         assertApprovesFrame(
             account,
-            _context(SCHEME_P256, nextSigner, bytes32(0), selected(0), SCOPE_BOTH),
+            _context(SCHEME_P256, nextSigner, bytes32(0), 0, SCOPE_BOTH),
             "the rotated key must authorise"
         );
     }

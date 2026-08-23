@@ -22,7 +22,6 @@ contract WebAuthnPaymaster {
     error InvalidConfiguration();
     error NotOwner();
     error WithdrawFailed();
-    error ExpectedOneSignature();
     error BadScheme(uint256 scheme);
     error ExplicitSignatureMessage();
     error InvalidWebAuthnAssertion();
@@ -59,10 +58,7 @@ contract WebAuthnPaymaster {
     }
 
     /// @notice Approve payment after validating the selected WebAuthn assertion.
-    function sponsorTransaction(uint256[] calldata signatureIndices) external {
-        if (signatureIndices.length != 1) revert ExpectedOneSignature();
-        uint256 signatureIndex = signatureIndices[0];
-
+    function sponsorTransaction(uint256 signatureIndex) external {
         uint256 scheme = FrameTxLib.sigScheme(signatureIndex);
         if (scheme != FrameTxLib.SCHEME_ARBITRARY) revert BadScheme(scheme);
         if (!FrameTxLib.signedThisTx(signatureIndex)) revert ExplicitSignatureMessage();

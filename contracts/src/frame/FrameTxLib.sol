@@ -28,6 +28,7 @@ library FrameTxLib {
     uint256 internal constant SCHEME_ARBITRARY = 0;
     uint256 internal constant SCHEME_SECP256K1 = 1;
     uint256 internal constant SCHEME_P256 = 2;
+    uint256 internal constant SCHEME_ML_DSA_44 = 3;
 
     /// Frame modes (`frameMode`). Modes 0-2 are normative EIP-8141;
     /// MODE_POST_TX is a non-normative tooling-fixture mode.
@@ -648,7 +649,11 @@ library FrameTxLib {
 
     /// @notice Global TXTRACE storage index at an account-local index
     ///         (TXDIFF 0x07). Halts when the local index is out of bounds.
-    function accountStorageDiffIndex(address account, uint256 localIndex) internal view returns (uint256 v) {
+    function accountStorageDiffIndex(address account, uint256 localIndex)
+        internal
+        view
+        returns (uint256 v)
+    {
         assembly ("memory-safe") {
             v := txdiff(0x07, account, localIndex)
         }
@@ -663,7 +668,11 @@ library FrameTxLib {
 
     /// @notice Global TXTRACE event index at an account-local index
     ///         (TXDIFF 0x09). Halts when the local index is out of bounds.
-    function accountEventIndex(address account, uint256 localIndex) internal view returns (uint256 v) {
+    function accountEventIndex(address account, uint256 localIndex)
+        internal
+        view
+        returns (uint256 v)
+    {
         assembly ("memory-safe") {
             v := txdiff(0x09, account, localIndex)
         }

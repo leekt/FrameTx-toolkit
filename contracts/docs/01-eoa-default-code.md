@@ -70,12 +70,15 @@ Four things are load-bearing and easy to get wrong:
    at all. For a *sponsor* frame the `target` is the sponsor's address, and the sponsor's
    signature entry must carry an explicit 20-byte `signer` equal to it.
 
-Note that the protocol has already verified every `SECP256K1`/`P256` signature in the envelope
-*before any frame runs* — against the signature hash when `msg` is empty, against the explicit
-32-byte digest otherwise. The default code does no `ecrecover`: it
+Note that the protocol has already verified every supported native signature in the envelope
+*before any frame runs* — upstream `SECP256K1`/`P256`, plus this toolkit's experimental
+ML-DSA-44 scheme `0x03`. The default code does no `ecrecover`: it
 only asks "is the already-verified signer at index N the account I am validating for?". This is
 the same idea the smart-account examples in this repo implement with `SIGPARAM` — the default
-code is just the protocol-supplied version of it.
+code is just the protocol-supplied version of it. Its policy nevertheless remains
+**secp256k1-only**: a P256 or ML-DSA-44 entry at the selected index is rejected. A codeless
+post-quantum key identity needs account code or a delegation to compatible code; see
+[`10-pq.md`](10-pq.md).
 
 The resulting `APPROVE(0x3)` does what it does for any account: sets `sender_approved = true`,
 increments the sender's nonce **once**, sets `payer = tx.sender`, and collects `max_cost` from
@@ -121,9 +124,31 @@ the sponsor's carrying an explicit 20-byte `signer`. Neither batching nor sponso
 code deployed at either address. Leaving frame 0 at `0x3` and appending the sponsor frame
 makes the transaction invalid (frame 1 reverts, and a reverting `VERIFY` frame is fatal).
 
+## Reusing index 1 with a multisig owner
+
+The payment signature need not be separate from every account-policy signature. A codeless
+secp256k1 payer can also be an owner of the sending `MultisigAccount`, and its one entry can
+serve both validations:
+
+| Index | Scheme | Signer | `msg` | Used by |
+|---:|---|---|---|---|
+| `1` | `SECP256K1` | Explicit codeless payer/owner address | Empty | Multisig threshold and default-code PAYMENT |
+
+The multisig execution frame includes index `1` in its signed `uint256[]` selection, in the
+ascending signer-address order that contract requires. A later flags-`0x1` VERIFY frame
+targets the same codeless signer. Default code selects index `1` by its PAYMENT rule and
+accepts the exact same canonical `v || r || s` entry. Because `tx.sender` is the multisig,
+the payer entry must carry its signer explicitly rather than relying on the empty-signer
+fallback.
+
+There is one envelope entry and no second signature: both policies consume the same
+empty-`msg` signature over `compute_sig_hash(tx)`. This reuse is specific to a secp256k1
+default payer. Scheme `0x03` cannot replace it unless the payer has compatible code or the
+protocol's default-code rule changes.
+
 ## What the Anvil tests prove
 
-The working-tree integration suite at
+The pinned current-spec integration suite at
 [`foundry/crates/anvil/tests/it/frame_tx.rs`](../../foundry/crates/anvil/tests/it/frame_tx.rs)
 submits signed type-`0x06` envelopes through Anvil's raw JSON-RPC path and asserts resulting
 state. Its default-code cases pin both self-relay and sponsorship:
@@ -134,15 +159,22 @@ state. Its default-code cases pin both self-relay and sponsorship:
   nothing;
 - `default_code_verify_with_an_explicit_msg_is_not_mined` uses a correctly signed explicit
   digest, proving signature validity alone is insufficient;
-- `default_code_payment_only_scope_uses_signature_index_one` proves a codeless sponsor pays
+- `zero_balance_sender_is_accepted_when_signature_index_one_sponsor_pays` proves a codeless sponsor pays
   and the user operation executes;
 - `default_code_payment_only_scope_ignores_a_signature_at_another_index` moves the sponsor
-  signature away from index 1 and proves positional selection is enforced.
+  signature away from index 1 and proves positional selection is enforced; and
+- `multisig_owner_reuses_its_execution_signature_to_pay_via_default_eoa_code` proves the
+  index-1 entry can count toward a 2-of-2 multisig and pay through the owner's codeless
+  default code. Its declared verification prefix is 65,600 gas, and the payer owner's own
+  EOA nonce remains unchanged while the multisig sender nonce advances.
 
 The positive self-relay integration also checks that the sender nonce advances once, the
 payer loses value plus a non-zero fee, the SENDER target receives value and writes storage,
-and the mined transaction is retrievable as type `0x06`. These tests are part of the recorded
-Foundry gitlink; see [VERSIONS.md](../../VERSIONS.md#reproducibility-status).
+and the mined transaction is retrievable as type `0x06`. These tests are in pinned Foundry
+commit `ffe76454940945b3b8ae6c7a6a0ae2939b4ff126` on the advertised
+`feat/eip8141-current-spec` branch; its 31/31 Anvil integration tests pass. The root gitlink
+records that commit, so a fresh recursive clone reproduces them. See
+[VERSIONS.md](../../VERSIONS.md#reproducibility-status) for the exact reproducible stack.
 
 ## Why this matters
 
@@ -161,12 +193,13 @@ functionality, so tooling can assume it rather than probing for it.
 
 ## Notes on the spec
 
-Things that are underspecified or surprising, flagged rather than guessed:
+Things that are surprising or still easy to misread:
 
-- **Gas cost of the default code is not specified.** The spec says what the default code *does*
-  but never assigns a separate cost; contrast the expiry verifier frame, where it explicitly
-  says "the frame consumes gas according to normal EVM execution rules". Do not treat a
-  client's current account-access charge as a spec guarantee.
+- **Default code has no execution charge of its own.** The current spec instead charges the
+  resolved target's warm/cold EIP-2929 access at frame entry, before balance checking and
+  dispatch. A `VERIFY` frame that cannot cover that access halts before default code runs.
+- **Active precompiles win dispatch.** A code-less address that is an active precompile at the
+  current fork executes as that precompile; it does not receive EIP-8141 default-code behavior.
 - **Out-of-range `sig_index` is not called out.** If `allowed_scope == 0x1` and the transaction
   carries fewer than two signatures, the spec's phrasing ("if there is not a `SECP256K1`
   signature at index `sig_index` such that…") implies a revert. Anvil's implementation uses a

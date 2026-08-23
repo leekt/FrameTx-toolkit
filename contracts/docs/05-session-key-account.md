@@ -6,30 +6,31 @@
 - a registered session key may authorize only zero-value `SENDER` calls on an allowlist of
   `(target, selector)` pairs, with an expiry no later than the key's `validUntil`.
 
-The account never runs `ecrecover`. The protocol validates every `SECP256K1` and `P256`
-entry before frame execution. The account inspects signer metadata, requires the canonical
+The account never runs `ecrecover`. The protocol validates every supported native entry
+before frame execution: `SECP256K1`, `P256`, and this toolkit's experimental ML-DSA-44
+scheme `0x03`. The account inspects signer metadata, requires the canonical
 transaction-hash case, and applies its owner or session policy.
 
-## Shared validation ABI and signature routing
+## Single-index validation ABI and signature routing
 
 The contract implements:
 
 ```solidity
-function validate(uint256[] calldata signatureIndices) external;
+function validate(uint256 signatureIndex) external;
 ```
 
-Its selector is `0x25b90494`. `_authorize` examines only the entries named by
-`signatureIndices`; it does not scan the full signature envelope. This lets an account and
+Its selector is `0xce4d01a3`. `_authorize` examines exactly the entry named by
+`signatureIndex`; it does not scan the signature envelope. This lets an account and
 paymaster share one transaction without relying on fixed envelope positions.
 
-Among selected canonical signatures, the owner wins wherever it appears. Otherwise the
-registered session signer with the greatest non-zero `validUntil` supplies the restricted
-authority. An unselected owner signature does not upgrade a selected session-key
-transaction, and an empty selection authorizes nothing.
+If the selected canonical signature resolves to the owner, authority is unrestricted. If it
+resolves to a registered session key with non-zero `validUntil`, the restricted policy
+applies. An unselected owner signature does not upgrade a transaction whose selected entry
+belongs to a session key.
 
-The index array is itself authenticated. VERIFY-frame calldata is included in the frame
-list covered by `compute_sig_hash(tx)`, so changing the selected entries invalidates the
-canonical signatures. Each selected entry still needs policy checks:
+The index is itself authenticated. VERIFY-frame calldata is included in the frame list
+covered by `compute_sig_hash(tx)`, so changing the selected entry invalidates the canonical
+signatures. The selected entry still needs policy checks:
 
 - filter `ARBITRARY` before requesting `resolved_signer`;
 - require `msg == 0`, the EVM marker for the canonical transaction hash; and
@@ -37,6 +38,12 @@ canonical signatures. Each selected entry still needs policy checks:
 
 An out-of-range selected index fails the `SIGPARAM` bounds check. An explicit-digest
 signature may be protocol-valid, but it does not commit to this transaction and is ignored.
+
+Because the policy keys are addresses, either the owner or a session key may use any of the
+three native schemes. Configure an ML-DSA-44 key as
+`low20(keccak256(0x03 || publicKey))`; the account does not store or parse the public key.
+The exact non-normative wire and its gas limits are documented in
+[`10-pq.md`](10-pq.md).
 
 ## Why every SENDER frame is checked
 
@@ -110,7 +117,7 @@ compatible paymaster for public sponsorship.
 | # | Mode | Flags | Target | Data | Purpose |
 |---|---|---|---|---|---|
 | 0 | `VERIFY` | `0x0` | expiry verifier (`0x8141`) | 8-byte deadline | Protocol-enforced time bound |
-| 1 | `VERIFY` | `0x3` | account or null | `validate([sessionSigIndex])` | Authenticate, enforce policy, approve execution and payment |
+| 1 | `VERIFY` | `0x3` | account or null | `validate(sessionSigIndex)` | Authenticate, enforce policy, approve execution and payment |
 | 2… | `SENDER` | operation flags | allowlisted target | allowlisted calldata | Restricted operations |
 
 For an owner-authorized self-funded transaction, omit the expiry frame and place the
@@ -121,7 +128,7 @@ flags-`0x3` account validator at index zero.
 | # | Mode | Flags | Target | Data | Purpose |
 |---|---|---|---|---|---|
 | 0 | `VERIFY` | `0x0` | expiry verifier | 8-byte deadline | Required time bound |
-| 1 | `VERIFY` | `0x2` | account or null | `validate([sessionSigIndex])` | Authenticate, enforce policy, approve execution |
+| 1 | `VERIFY` | `0x2` | account or null | `validate(sessionSigIndex)` | Authenticate, enforce policy, approve execution |
 | 2 | `VERIFY` | `0x1` | paymaster | paymaster-specific | Approve payment |
 | 3… | `SENDER` | operation flags | allowlisted target | allowlisted calldata | Restricted operations |
 
@@ -131,7 +138,7 @@ remaining frames. The paymaster must remain after execution approval.
 ### Paying for another sender
 
 The other account first validates with scope `EXECUTION`. A following flags-`0x1` frame
-targets this funded session account and calls `validate([payerSigIndex, ...])`. If a selected
+targets this funded session account and calls `validate(payerSigIndex)`. If the selected
 session key supplies payer authority, place the expiry verifier first and ensure every later
 `SENDER` operation satisfies this account's session policy.
 
@@ -187,7 +194,7 @@ Selectors:
 
 | Selector | Function |
 |---|---|
-| `0x25b90494` | `validate(uint256[])` |
+| `0xce4d01a3` | `validate(uint256)` |
 | `0x580da310` | `setSessionKey(address,uint64)` |
 | `0x2b370b67` | `setAllowedCall(address,bytes4,bool)` |
 | `0x8da5cb5b` | `owner()` |
@@ -200,7 +207,7 @@ Selectors:
 [`AccountTestSuite`](../test/AccountTestSuite.sol). Its inherited owner-authorized matrix
 proves shifted routing, self-payment, external sponsorship, payment for another sender,
 exact scopes, and funding. The concrete tests add session-key allowlist, expiry, multi-frame,
-selected-owner precedence, and explicit-digest coverage.
+owner-versus-session authorization, and explicit-digest coverage.
 
 ## Deliberately out of scope
 

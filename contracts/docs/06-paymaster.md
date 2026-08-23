@@ -25,12 +25,12 @@ its `pay` frame runs it:
    `maxSponsoredCost`.
 5. Calls `FrameTxLib.approve(FrameTxLib.SCOPE_PAYMENT)`, PAYMENT scope only.
 
-**It does not run `ecrecover`.** The protocol verifies every `SECP256K1`/`P256` entry against
-its selected message *before any frame executes* (spec, "Behavior": signatures are validated
-at step 3, frames start after). A frame that reaches `SIGPARAM` is therefore looking at
-metadata that is already proven. The contract decides **whether it trusts that key and
-whether the selected message is the canonical transaction hash**; neither decision repeats
-the cryptography.
+**It does not run `ecrecover`.** The protocol verifies every supported native entry against
+its selected message *before any frame executes*: upstream `SECP256K1`/`P256`, plus this
+toolkit's experimental ML-DSA-44 scheme `0x03`. A frame that reaches `SIGPARAM` is therefore
+looking at metadata that is already proven. This particular contract still requires
+`SECP256K1`; it decides **whether it trusts that key and whether the selected message is the
+canonical transaction hash** without repeating the cryptography.
 
 Step 3 is the non-obvious one. `msg == 0` is the EVM-visible marker for "this signature is
 over the canonical transaction signature hash". A non-zero `msg` is an explicit 32-byte
@@ -52,33 +52,47 @@ The transaction must use the public mempool's **Canonical Paymaster** prefix
 
 | Frame | Subclass      | Mode    | Flags | Caller        | Target        | Value | Data                            | Purpose |
 | ----- | ------------- | ------- | ----- | ------------- | ------------- | ----- | ------------------------------- | ------- |
-| 0     | `only_verify` | VERIFY  | `0x2` | `ENTRY_POINT` | Null (sender) | 0     | `validate(uint256[] accountSignatureIndices)` for the toolkit accounts | Account validates selected entries and calls `APPROVE(APPROVE_EXECUTION)` → sets `sender_approved = true` |
+| 0     | `only_verify` | VERIFY  | `0x2` | `ENTRY_POINT` | Null (sender) | 0     | `validate(uint256 accountSignatureIndex)` for an ordinary toolkit account; `validate(uint256[])` for multisig | Account validates its selected entry or threshold set and calls `APPROVE(APPROVE_EXECUTION)` → sets `sender_approved = true` |
 | 1     | `pay`         | VERIFY  | `0x1` | `ENTRY_POINT` | **this paymaster** | 0 | `sponsorTransaction(uint256 sigIndex)` | Checks the sponsor signature, calls `APPROVE(APPROVE_PAYMENT)` → sets `payer = paymaster`, collects `max_cost` |
 | 2     | `user_op`     | SENDER  | `0x0` | sender        | whatever      | any   | the user's call                 | The actual operation, `caller == tx.sender` |
 
 `tx.signatures` must contain the entries required by the sender account and the sponsor's
 entry at `sigIndex`. With separate account and sponsor keys that means at least two entries.
-The account receives only its own selected indices through frame 0; this paymaster receives
-its selected index through frame 1. Neither component has to assume signature zero or scan
-the other component's entries. The sponsor entry is `scheme = SECP256K1`,
+An ordinary account receives its one selected index through frame 0 (multisig receives its
+owner-index array); this paymaster receives one selected index through frame 1. Neither
+component has to assume signature zero or scan the other component's entries. The sponsor
+entry is `scheme = SECP256K1`,
 `signer = <sponsorSigner address>`, `msg = <empty>`, signed over `compute_sig_hash(tx)`.
 
 Frame 1 data is a normal ABI call: selector `0x217de4d8` followed by the 32-byte
 `sigIndex`. For a two-signature transaction with the account's signature at index 0, that
 is `0x217de4d8` + `0x00…01`.
 
-Both pieces of routing are authenticated. The account index array and the paymaster's
-`sigIndex` are frame calldata, hence part of the frame list covered by every canonical
-transaction signature.
+Both pieces of routing are authenticated. The account index (or multisig index array) and
+the paymaster's `sigIndex` are frame calldata, hence part of the frame list covered by every
+canonical transaction signature. All four current paymasters use the same
+`sponsorTransaction(uint256)` ABI and selector `0x217de4d8`.
+
+The algorithm-specific alternatives keep their checks exact:
+
+- [`P256Paymaster`](09-p256-and-webauthn.md#p256paymaster) requires native `P256` scheme
+  `0x02`;
+- [`WebAuthnPaymaster`](09-p256-and-webauthn.md#webauthnpaymaster) requires its exact
+  contract-verified `ARBITRARY` assertion profile; and
+- [`MLDSAPaymaster`](10-pq.md#dedicated-paymaster) requires the toolkit-local native
+  ML-DSA-44 scheme `0x03`.
+
+None widens another paymaster's accepted algorithm merely because all four expose the same
+scalar routing ABI.
 
 ### Ordering requirement — the `pay` frame MUST come after `only_verify`
 
 This is not a style preference, it is enforced by the `APPROVE` opcode. From the spec's
 `APPROVE` behavior, for `APPROVE_PAYMENT`:
 
-> - If `payer` was already set, revert the frame.
-> - If `resolved_target` has insufficient balance, revert the frame.
-> - **If `sender_approved == false`, revert the frame.**
+> - If `payer` was already set, revert the current call frame.
+> - If `resolved_target` has insufficient balance, revert the current call frame.
+> - **If `sender_approved == false`, revert the current call frame.**
 
 So a `pay` frame placed first reverts — and because a reverting VERIFY frame makes the
 **whole transaction invalid**, the transaction is not merely rejected, it never becomes
@@ -181,10 +195,10 @@ same suite by deploying, configuring, and funding its subject in `setUp()`, then
 
 ```solidity
 function _paymasterUnderTest() internal view returns (address);
-function _paymasterTestSignatures()
+function _paymasterTestSignature()
     internal view
-    returns (IFrameVm.FrameTxSignature[] memory);
-function _paymasterTestCall(uint256[] memory signatureIndices)
+    returns (IFrameVm.FrameTxSignature memory);
+function _paymasterTestCall(uint256 signatureIndex)
     internal view
     returns (bytes memory);
 function _paymasterTestMaxCost() internal view returns (uint256);
@@ -193,16 +207,22 @@ function _paymasterTestMaxCost() internal view returns (uint256);
 function _preparePaymasterForAccount(address account) internal;
 ```
 
-`_paymasterTestSignatures()` may return an empty array for a policy that does not authorize
-through signature entries. In that case the index-misrouting case is inapplicable; the five
-account sponsorship cases still run. The optional preparation hook defaults to a no-op.
+The suite deliberately models a signature-authorized paymaster with exactly one selected
+entry. A proof-only or allowlist-only paymaster needs a policy-specific suite instead of
+pretending to supply an empty index set. The optional preparation hook defaults to a no-op.
 
 The suite builds one shared, shifted signature envelope and requires the paymaster to sponsor
 `OwnerAccount`, `MultisigAccount`, `SessionKeyAccount` through its owner path, the portable
-Yul account, and the builtin Yul account. It also proves that routing the paymaster to the
-account's selected entries is refused when the paymaster uses signatures. Each fixture invokes the account's `EXECUTION` path
-and then the paymaster's `PAYMENT` path with independently installed synthetic context;
-`sender_approved` does not persist between those calls.
+Yul account, the builtin Yul account, `P256Account`, `WebAuthnAccount`, and `MLDSAAccount`.
+It also proves that routing the paymaster to an account's selected entry is refused. Each fixture invokes
+the account's `EXECUTION` path and then the paymaster's
+`PAYMENT` path with independently installed synthetic context; `sender_approved` does not
+persist between those calls.
+
+`SponsoringPaymasterTest`, `P256PaymasterTest`, `WebAuthnPaymasterTest`, and
+`MLDSAPaymasterTest` all inherit this eight-account matrix. ML-DSA entries in the Solidity
+suite are already-verified metadata fixtures; the native Rust transaction tests, not this
+contract suite, exercise the 3,732-byte cryptographic wire.
 
 These are opcode-level conformance tests: they prove the correct approval path and scope,
 not the eventual ETH debit or refund. Transaction-level accounting belongs in the Anvil
@@ -228,10 +248,11 @@ raw-transaction suite.
   this example returns empty (`approvetx(0, 0, 1)`). A `post_op` frame could in principle
   want data from it, but there is no defined channel — `FRAMEDATA*` reads a frame's *input*
   `data`, not its output.
-- `P256` (`scheme = 0x2`) signatures also carry a resolved signer address and are equally
-  protocol-verified, so accepting them would be sound; this example restricts to
-  `SECP256K1` only to keep the trusted-key model to one line. If you widen it, keep the
-  `msg == 0` check — that one is load-bearing.
+- `P256` (`0x2`) and toolkit-local `ML_DSA_44` (`0x3`) signatures also carry a
+  protocol-verified resolved signer. This example nevertheless restricts its policy to
+  `SECP256K1`; use the dedicated paymaster for an exact alternative rather than silently
+  widening a deployed sponsor policy. In every case, keep the `msg == 0` check — that one is
+  load-bearing.
 
 ## Compiling
 

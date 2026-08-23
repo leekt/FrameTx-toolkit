@@ -19,7 +19,6 @@ contract WebAuthnAccount is IFrameAccount {
     bool public immutable requireUserVerification;
 
     error InvalidConfiguration();
-    error ExpectedOneSignature();
     error BadScheme(uint256 scheme);
     error ExplicitSignatureMessage();
     error InvalidWebAuthnAssertion();
@@ -44,10 +43,7 @@ contract WebAuthnAccount is IFrameAccount {
     }
 
     /// @notice Validate the one selected WebAuthn assertion and approve this frame's scope.
-    function validate(uint256[] calldata signatureIndices) external override {
-        if (signatureIndices.length != 1) revert ExpectedOneSignature();
-        uint256 signatureIndex = signatureIndices[0];
-
+    function validate(uint256 signatureIndex) external override {
         uint256 scheme = FrameTxLib.sigScheme(signatureIndex);
         if (scheme != FrameTxLib.SCHEME_ARBITRARY) revert BadScheme(scheme);
         if (!FrameTxLib.signedThisTx(signatureIndex)) revert ExplicitSignatureMessage();

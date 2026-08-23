@@ -52,6 +52,29 @@ contract MultisigAccountTest is AccountTestSuite {
         signatures[1] = secpSig(OWNER_B);
     }
 
+    /// Multisig is the only Solidity account whose policy selects a dynamic set
+    /// of entries. All other accounts inherit the suite's validate(uint256) ABI.
+    function accountValidationCalldata(uint256 firstSignatureIndex)
+        internal
+        pure
+        override
+        returns (bytes memory)
+    {
+        uint256[] memory signatureIndices = new uint256[](2);
+        for (uint256 i = 0; i < 2; ++i) {
+            signatureIndices[i] = firstSignatureIndex + i;
+        }
+        return _multisigValidationCalldata(signatureIndices);
+    }
+
+    function _multisigValidationCalldata(uint256[] memory signatureIndices)
+        private
+        pure
+        returns (bytes memory)
+    {
+        return abi.encodeWithSignature("validate(uint256[])", signatureIndices);
+    }
+
     function _threshold() internal view returns (uint256) {
         (bool ok, bytes memory ret) = account.staticcall(abi.encodeWithSignature("threshold()"));
         require(ok, "threshold() failed");
@@ -72,7 +95,7 @@ contract MultisigAccountTest is AccountTestSuite {
         uint256[] memory signatureIndices
     ) internal view returns (IFrameVm.FrameTx memory ctx) {
         ctx = verifyContext(account, scopes, bytes32(uint256(0xf00d)));
-        ctx.frames[0].data = validationCalldata(signatureIndices);
+        ctx.frames[0].data = _multisigValidationCalldata(signatureIndices);
         ctx.signatures = sigs;
     }
 
@@ -144,6 +167,14 @@ contract MultisigAccountTest is AccountTestSuite {
         );
     }
 
+    function test_emptySignatureSelectionIsRefused() public {
+        assertRefusesFrame(
+            account,
+            _ctx(SCOPE_BOTH, new IFrameVm.FrameTxSignature[](0), new uint256[](0)),
+            "an empty multisig selection must not authorize"
+        );
+    }
+
     function test_nonOwnersRefused() public {
         assertRefusesFrame(
             account,
@@ -182,13 +213,79 @@ contract MultisigAccountTest is AccountTestSuite {
         );
     }
 
-    /// P256 entries are protocol-verified too, but this account restricts itself to
-    /// SECP256K1, so a P256 owner entry does not count toward the threshold.
-    function test_p256EntryNotCounted() public {
+    /// Every supported native scheme exposes an already-verified resolved signer.
+    function test_p256AndMLDSAOwnerEntriesCount() public {
         IFrameVm.FrameTxSignature[] memory sigs = _sigs(OWNER_A, OWNER_B);
-        sigs[1].scheme = 2;
+        sigs[0] = p256Sig(OWNER_A);
+        sigs[1] = mldsaSig(OWNER_B);
+        assertApprovesFrame(
+            account,
+            _ctx(SCOPE_BOTH, sigs, selected(0, 1)),
+            "P256 and ML-DSA-44 owner identities must both count"
+        );
+    }
+
+    function test_mixedSecp256k1AndMLDSAOwnerEntriesCount() public {
+        IFrameVm.FrameTxSignature[] memory sigs = _sigs(OWNER_A, OWNER_B);
+        sigs[1] = mldsaSig(OWNER_B);
+        assertApprovesFrame(
+            account,
+            _ctx(SCOPE_BOTH, sigs, selected(0, 1)),
+            "a secp256k1 owner and an ML-DSA-44 owner must reach threshold"
+        );
+    }
+
+    function test_arbitraryOwnerEntryDoesNotCount() public {
+        IFrameVm.FrameTxSignature[] memory sigs = _sigs(OWNER_A, OWNER_B);
+        sigs[1] = IFrameVm.FrameTxSignature({
+            scheme: 0, signer: OWNER_B, msgHash: bytes32(0), signature: hex"03"
+        });
         assertRefusesFrame(
-            account, _ctx(SCOPE_BOTH, sigs, selected(0, 1)), "P256 entry must not count here"
+            account,
+            _ctx(SCOPE_BOTH, sigs, selected(0, 1)),
+            "an ARBITRARY entry has no protocol-resolved owner identity"
+        );
+    }
+
+    function test_unknownNativeSchemeDoesNotCount() public {
+        IFrameVm.FrameTxSignature[] memory sigs = _sigs(OWNER_A, OWNER_B);
+        sigs[1].scheme = 4;
+        assertRefusesFrame(
+            account,
+            _ctx(SCOPE_BOTH, sigs, selected(0, 1)),
+            "an unknown native scheme must not count"
+        );
+    }
+
+    /// The synthetic fixture proves the routing relationship only. The real
+    /// default-code PAYMENT execution and balance debit belong to Anvil's raw
+    /// transaction suite.
+    function test_ownerSignatureIndexOneCanBeReusedByLaterDefaultEOAPayerFrame() public {
+        IFrameVm.FrameTxSignature[] memory sigs = _sigs(OWNER_A, OWNER_B);
+        uint256[] memory ownerIndices = selected(0, 1);
+
+        IFrameVm.FrameTx memory ctx =
+            verifyContext(account, SCOPE_EXECUTION, bytes32(uint256(0xf00d)));
+        ctx.frames = new IFrameVm.FrameTxFrame[](3);
+        ctx.frames[0] =
+            verifyFrame(account, SCOPE_EXECUTION, _multisigValidationCalldata(ownerIndices), 0);
+        ctx.frames[1] = verifyFrame(OWNER_B, SCOPE_PAYMENT, "", 0);
+        ctx.frames[2] = senderFrame();
+        ctx.signatures = sigs;
+        ctx.maxCost = SUITE_MAX_COST;
+        ctx.approvableScopes = SCOPE_EXECUTION;
+        vm.deal(OWNER_B, SUITE_MAX_COST);
+
+        assertEq(ctx.signatures[1].scheme, 1, "default payer requires secp256k1");
+        assertEq(ctx.signatures[1].signer, OWNER_B, "payer must be owner at signature index 1");
+        assertEq(ctx.signatures[1].msgHash, bytes32(0), "payer entry must sign this transaction");
+        assertEq(ctx.frames[1].target, OWNER_B, "later PAYMENT frame must target that owner EOA");
+        assertEq(ctx.frames[1].flags, SCOPE_PAYMENT, "later frame must be PAYMENT only");
+        assertEq(ctx.frames[1].data.length, 0, "default EOA validation uses no calldata");
+        assertApprovesFrame(
+            account,
+            ctx,
+            "multisig must count the same index-1 owner entry routed to the later payer"
         );
     }
 

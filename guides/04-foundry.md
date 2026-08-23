@@ -11,18 +11,30 @@ add the protocol behavior and patches Foundry to use that fork.
 
 ## Status
 
-This table describes the published submodule commits recorded in
-[VERSIONS.md](../VERSIONS.md).
+This table describes behavior exercised in the reproducible current-spec stack recorded in
+[VERSIONS.md](../VERSIONS.md). All four submodules use the pushed branch
+`feat/eip8141-current-spec`: [Solidity](../solidity/) commit
+`cc3e100a84ab68aca75a2b48e576cfbcc7237caf` on upstream
+`f985208342dc9d695a9097caf8206b11024df979`; [revm](../revm/) commit
+`cad0e9fc012f790719791ff274b76eb852689559` on upstream
+`17a323dac0f893aef6a29d48692185495b366149`; [foundry-core](../foundry-core/) commit
+`f415f6fef0a62f44c7faa83daa8e37b14f0e009b` on upstream
+`78e5b57f86986eabd969a5fdf238b8159f7086fd`; and [Foundry](../foundry/) commit
+`ffe76454940945b3b8ae6c7a6a0ae2939b4ff126` on upstream
+`8bb78aeceda2eca7837d385e4f5bd39d6fc8bc71`. The root gitlinks pin these exact commits, so a
+fresh recursive clone reproduces the stack.
 
 | Capability | State |
 |---|---|
 | revm executes the seven opcodes | **Done** — covered by interpreter and account tests |
 | revm/compiler execute provisional B6-B9 | **Done** — synthetic `setFrameTx` contexts only |
-| `forge` built against the patched revm | **Done** — every revm crate resolves to the fork |
-| `forge build` compiling `@future` sources natively | **Done** — the foundry-core compilers fork adds `EvmVersion::Future`; `evm_version = "@future"` plus `experimental = true` drive the patched solc over standard JSON |
+| `forge` built against the patched revm | **Done** — Foundry `ffe76454940945b3b8ae6c7a6a0ae2939b4ff126` resolves every revm crate to refreshed head `cad0e9fc012f790719791ff274b76eb852689559` |
+| `forge build` compiling `@future` sources natively | **Done** — refreshed foundry-core `f415f6fef0a62f44c7faa83daa8e37b14f0e009b` adds `EvmVersion::Future`; `evm_version = "@future"` plus `experimental = true` drive the patched solc over standard JSON |
+| Current-spec Foundry promotion | **Done** — 30/30 primitives, 44/44 Anvil unit, and 31/31 Anvil integration tests pass |
 | `setFrameTx` / `clearFrameTx` cheatcodes | **Done** |
-| `forge test` executing frame accounts | **Done** — full `contracts/` suite passes under the working-tree debug Forge |
-| anvil accepting baseline type `0x06` transactions | **Done** — explicit opt-in; decode, validate, execute; 27 integration tests |
+| `forge test` executing frame accounts | **Done** — full `contracts/` suite passes under the current-spec debug Forge |
+| anvil accepting baseline type `0x06` transactions | **Done** — explicit opt-in; decode, validate, and execute through the integration suite |
+| Toolkit-local native ML-DSA-44 | **Done, experimental** — scheme `0x03`, exact canonical wire, native cryptographic unit tests, production-account raw Anvil execution, and contract policy suites; upstream reserves the value |
 | Atomic batches and default code in anvil | **Done** — terminator rollback, mid-batch skip, signature-index selection all pinned |
 | Frame receipts and receipt trie roots | **Done** — `payer` plus ordered `frameReceipts` over RPC and canonical typed consensus encoding |
 | Raw tracing and fork replay | **Done** — `trace_rawTransaction`, `trace_replayTransaction`, raw-block fetches, and transaction-hash replay |
@@ -30,7 +42,7 @@ This table describes the published submodule commits recorded in
 | EIP-7819 `SETDELEGATE` | **Done** — separate explicit Anvil opt-in with compiler, VM, reset, and four end-to-end activation/semantics tests |
 | EIP-7851 code-controlled delegation | **Done** — separate Ethereum-only opt-in with compiler, VM, sender/auth validation, reset, and ten end-to-end tests; opcode `0xf7` is explicitly non-normative |
 | EIP-8151 code-restricted ECRecover | **Done** — separate Ethereum-only opt-in with compiler mutability/formal modeling, VM gas/raw-code checks, reset, replay, overrides, and eight end-to-end tests |
-| EIP-8250/8272/7906 wire integration | Pending — fixture/context support is not transaction support |
+| EIP-8250/8272/7906 wire integration | Not implemented — fixture/context support is not transaction support |
 | Contract `pay` frames over raw RPC | Untested — default-code sponsor payment is covered |
 
 ## Building
@@ -47,8 +59,14 @@ cd ../foundry
 cargo build --locked --bin forge --bin anvil
 ```
 
-Foundry's twelve manifest patches and lockfile resolve to the exact published REVM commit,
-which is the same commit the root repository's `revm` gitlink pins.
+Foundry's twelve manifest patches and lockfile resolve to the current REVM commit pinned by
+the root repository's `revm` gitlink. Foundry commit
+`ffe76454940945b3b8ae6c7a6a0ae2939b4ff126` resolves them to revm
+`cad0e9fc012f790719791ff274b76eb852689559` and foundry-core
+`f415f6fef0a62f44c7faa83daa8e37b14f0e009b`. Both dependency revisions are pushed and the
+locked graph resolves from a clean recursive clone.
+The refreshed Foundry commit also pins RustCrypto `ml-dsa` exactly at `0.1.1`; do not relax
+that dependency while reproducing the documented decoder and advisory status.
 
 > [!warning] Patch every revm crate together
 > `foundry/Cargo.toml` patches **all twelve** revm crates to the same immutable fork revision.
@@ -120,11 +138,19 @@ Frame transactions are disabled by default. Start Anvil with
 `--enable-frame-transactions`, then submit the baseline type `0x06` through
 `eth_sendRawTransaction`. Object-form Frame requests are rejected; this path intentionally
 requires the canonical signed envelope. The envelope, canonical signature hash (with
-empty-`msg` elision), `v‖r‖s` secp256k1 entries, frame execution with correct callers,
-VERIFY-as-static, the approval context, atomic batches, and default code are all implemented
-and covered by `crates/anvil/tests/it/frame_tx.rs` in the foundry submodule. Its 26 integration
-tests assert on resulting state, payment, typed receipts and their trie root, raw traces, and
-fork replay rather than only transaction acceptance.
+empty-`msg` elision), native secp256k1/P256 entries, the toolkit-local ML-DSA-44 wire, frame
+execution with correct callers, VERIFY-as-static, the approval context, atomic batches, and
+default code are all implemented and covered by `crates/anvil/tests/it/frame_tx.rs` in the
+foundry submodule. The integration tests assert on resulting state, payment, typed receipts
+and their trie root, raw traces, and fork replay rather than only transaction acceptance.
+
+The ML-DSA raw test runs the production `MLDSAAccount` runtime with a real 3,732-byte
+signature/public-key entry, keeps declared native verification plus VERIFY-frame execution
+at 95,000 gas, rejects a corrupted signature at admission, then checks the mined payer,
+balance debit, sender nonce, and SENDER-frame effect. A separate raw test puts a codeless
+secp256k1 multisig owner's signature at index 1, counts it for multisig execution, and reuses
+it in the later default PAYMENT frame. Its declared verification prefix is 65,600 gas; the
+test proves the owner paid while the payer EOA's own account nonce did not advance.
 
 The opt-in is supported on Ethereum execution profiles before Amsterdam. OP Stack, Tempo,
 Monad, and Amsterdam state-gas profiles reject Frame envelopes at submission. Enabled nodes
@@ -239,6 +265,6 @@ Still open:
 | EIP-8272 recent roots | No wire fields, pre-execution verification, or system contract; `RECENT_ROOT_CODE` remains TBD upstream |
 | EIP-7906 POST_TX | No suffix validation, trace construction, or execution-body rollback; gas remains provisional |
 | Amsterdam state gas | Frame transactions are rejected when node-level EIP-2780/EIP-8037 state-gas rules are active; the per-frame `limits.state` pools here meter only EIP-8141's own charge points |
-| EIP-7851 opcode assignment | Upstream remains TBD; the working tree consistently uses non-normative `0xf7` |
+| EIP-7851 opcode assignment | Upstream remains TBD; the current pinned stack consistently uses non-normative `0xf7` |
 | EIP-8151 activation/vectors | No named-fork activation or official EEST vectors exist; the toolkit uses explicit Prague-or-later opt-in |
 | Networking | No public gossip policy or blob-sidecar wrapper for type `0x06` |

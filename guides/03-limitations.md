@@ -12,20 +12,31 @@ EIP-8250/8272/7906-inspired fixture fields on the wire, public-mempool policy, o
 
 | Status | Component | Detail |
 |---|---|---|
-| Working-tree only | Baseline Anvil RPC | Decode, validate, mine, retrieve, trace, and replay raw type-`0x06` transactions (scalar nonce, `fees`/`limits` envelope); atomic batches, default code, canonical raw-byte fork replay, and transaction-hash forks are covered by `foundry/crates/anvil/tests/it/frame_tx.rs`. |
-| Working-tree only | Frame receipts | Consensus receipt encoding and trie roots include the payer and ordered `[status, gas_used, logs]` frame results; RPC receipts expose these as `payer` and `frameReceipts`. |
-| Working-tree only | Expiry activation | Enabled nodes install the canonical verifier at `0x8141` after source replay, and memory/fork resets restore it. |
+| Implemented | Baseline Anvil RPC | Decode, validate, mine, retrieve, trace, and replay raw type-`0x06` transactions (scalar nonce, `fees`/`limits` envelope); atomic batches, default code, canonical raw-byte fork replay, and transaction-hash forks are covered by [`frame_tx.rs`](../foundry/crates/anvil/tests/it/frame_tx.rs). |
+| Implemented | Frame receipts | Consensus receipt encoding and trie roots include the payer and ordered `[status, gas_used, logs]` frame results; RPC receipts expose these as `payer` and `frameReceipts`. |
+| Implemented | Expiry activation | Enabled nodes install the canonical verifier at `0x8141` after source replay, and memory/fork resets restore it. |
+| Experimental | Toolkit-local ML-DSA-44 | Native pure-mode FIPS 204 verification at upstream-reserved scheme `0x03`, exact 3,732-byte wire, 50,000-gas placeholder, dedicated account/paymaster policy tests, and a raw production-account Anvil path. This is experimental and non-portable. |
 | Missing | Fixture-inspired wire/state integration | No keyed-nonce list/state, recent-root list/verification, trace construction, or `POST_TX` suffix execution. Those fields exist only in synthetic `setFrameTx` fixtures. |
 | Missing | Prefix policy | The validation-prefix simulation and DoS rules from the spec are not implemented as a public transaction-pool admission policy. |
 | Partial | Sponsorship RPC path | A raw-RPC default-code sponsor is covered end to end; a contract `pay` frame and canonical-paymaster pool accounting are not. |
+| Known divergence | Fee-field width | Upstream admits fee scalars below `2**256`. The Frame decoder represents them as 256-bit values, but the current Alloy/REVM transaction APIs are `u128`, so Foundry validation rejects any fee field above `u128::MAX`. |
 | Partial | EIP-7997 factory | Anvil already installs the exact deterministic-factory address and runtime. It is available independently of Glamsterdam and has nonce `0`, not the activation-state nonce `1`. |
-| Working-tree only | EIP-7819 `SETDELEGATE` | Solc `@future`, REVM, and explicit Anvil activation cover exact location/code, Prague gating, gas/refund, static mode, collision, clearing, nonce, warmth, reset, and immediate-effect behavior. |
-| Working-tree only | EIP-7851 code-controlled delegation | Solc `@future`, REVM, and explicit Ethereum-only Anvil activation cover both designation versions, redelegation, sender and authorization rejection, gas/static/revert behavior, simulations, impersonation, reset, and Frame coexistence. Opcode `0xf7` is a non-normative local assignment because upstream remains TBD. |
-| Working-tree only | EIP-8151 code-restricted ECRecover | Solc `@future`, REVM, and explicit Ethereum-only Foundry/Anvil activation cover exact raw-code eligibility, malformed input, output, gas, warmth, rollback, replay, overrides, access-list inference, reset, and EIP-7851 transitions. No named-fork activation or official EEST vectors exist. |
+| Experimental opt-in | EIP-7819 `SETDELEGATE` | Solc `@future`, REVM, and explicit Anvil activation cover exact location/code, Prague gating, gas/refund, static mode, collision, clearing, nonce, warmth, reset, and immediate-effect behavior. |
+| Experimental opt-in | EIP-7851 code-controlled delegation | Solc `@future`, REVM, and explicit Ethereum-only Anvil activation cover both designation versions, redelegation, sender and authorization rejection, gas/static/revert behavior, simulations, impersonation, reset, and Frame coexistence. Opcode `0xf7` is a non-normative local assignment because upstream remains TBD. |
+| Experimental opt-in | EIP-8151 code-restricted ECRecover | Solc `@future`, REVM, and explicit Ethereum-only Foundry/Anvil activation cover exact raw-code eligibility, malformed input, output, gas, warmth, rollback, replay, overrides, access-list inference, reset, and EIP-7851 transitions. No named-fork activation or official EEST vectors exist. |
 | Missing | Networking | No frame-transaction gossip or blob-sidecar wrapper is implemented. |
 
-The exact Anvil and REVM commits are recorded in
-[VERSIONS.md](../VERSIONS.md#reproducibility-status).
+[VERSIONS.md](../VERSIONS.md#reproducibility-status) and the root gitlinks record this
+reproducible current-spec stack. All four submodules use the pushed branch
+`feat/eip8141-current-spec`: Solidity `cc3e100a84ab68aca75a2b48e576cfbcc7237caf`, revm
+`cad0e9fc012f790719791ff274b76eb852689559`, foundry-core
+`f415f6fef0a62f44c7faa83daa8e37b14f0e009b`, and Foundry
+`ffe76454940945b3b8ae6c7a6a0ae2939b4ff126`. Their respective upstream bases are
+`f985208342dc9d695a9097caf8206b11024df979`, `17a323dac0f893aef6a29d48692185495b366149`,
+`78e5b57f86986eabd969a5fdf238b8159f7086fd`, and
+`8bb78aeceda2eca7837d385e4f5bd39d6fc8bc71`. Foundry promotion passed 30/30 primitives,
+44/44 Anvil unit, and 31/31 Anvil integration tests. A fresh recursive clone checks out these
+exact revisions.
 
 ## Activation and execution profiles
 
@@ -61,7 +72,22 @@ an ordinary call. `trace_rawTransaction` and `trace_replayTransaction` do execut
 Frame path. On transaction-hash forks, Anvil fetches and hash-checks canonical raw bytes
 instead of trying to reconstruct unknown typed fields from JSON-RPC.
 
-## Deliberate divergences
+## Deliberate divergences and design notes
+
+### ML-DSA-44 scheme `0x03` is toolkit-local
+
+Upstream EIP-8141 reserves signature scheme `0x03`. The patched host assigns it to an
+experimental ML-DSA-44 profile so native post-quantum policy can be tested before an
+upstream wire is chosen. Its raw field is exactly `signature[2420] || publicKey[1312]`, its
+identity is `low20(keccak256(0x03 || publicKey))`, it verifies pure FIPS 204 with an empty
+context over the existing 32-byte FrameTx message, and it carries a provisional 50,000-gas
+verification charge.
+
+This is a consensus difference, not a convenience encoding: an upstream client rejects the
+scheme, and a future upstream allocation may conflict. The RustCrypto implementation is
+pinned but explicitly unaudited. The exact decoder, advisory note, gas/size consequences,
+contracts, default-code boundary, and tests are in
+[`contracts/docs/10-pq.md`](../contracts/docs/10-pq.md).
 
 ### `APPROVE` is spelled `approvetx` in Solidity and Yul
 
@@ -74,7 +100,11 @@ only the mnemonic differs.
 test pinning that at
 `solidity/test/libyul/yulSyntaxTests/frame_transaction_approve_never_reserved.yul`.
 
-### `SIGDATACOPY` is a separate native opcode
+### `SIGDATACOPY` is a separate native opcode (now upstream)
+
+The standalone `SIGDATACOPY` instruction is part of the official upstream pin as of
+2026-08-23. The history below explains why the compiler and VM forks use its fixed four-item
+stack shape; it is no longer a toolkit-local EIP-8141 divergence.
 
 The original draft overloaded `SIGPARAM`: params `0x00`–`0x03` took 2 operands and returned
 1, while param `0x04` took 5 and returned none. Solidity's `InstructionInfo` and revm's
@@ -136,7 +166,7 @@ stack-determined-arity opcode later removed it.
 ### `APPROVE` in a STATICCALL context
 
 The spec has `APPROVE` mutating state (nonce increment, payer, `max_cost` collection) inside
-a frame it also describes as a `STATICCALL`. The working-tree revm implementation permits
+a frame it also describes as a `STATICCALL`. The current pinned revm implementation permits
 the opcode's transaction-scoped approval update while ordinary state-changing opcodes remain
 blocked, making `APPROVE` the sole permitted mutation in a VERIFY frame.
 
@@ -160,13 +190,20 @@ depends on the exact boundary, treat it as unsettled.
 
 ## Spec status
 
-EIP-8141 is a **Draft** (created 2026-01-29). It is not final and details have already
-shifted — several third-party write-ups describe an older opcode set (`TXPARAMLOAD` /
+EIP-8141 is a **Draft** (created 2026-01-29), with an open official
+[`execution-specs` tracker](https://github.com/ethereum/execution-specs/issues/2829) in the
+[Bogota milestone](https://github.com/ethereum/execution-specs/milestone/29). It is not final
+and details have already shifted — several third-party write-ups describe an older opcode set (`TXPARAMLOAD` /
 `TXPARAMSIZE` / `TXPARAMCOPY`) and inverted `APPROVE` scope values. Check both upstream and
 the local implementation overlay rather than relying on a summary.
 
-Run `tools/check-spec-drift.sh` to compare current upstream EIP-8141 with the exact upstream
-source pin. [`spec/EIP8141.md`](../spec/EIP8141.md) contains the native-SIGDATACOPY
-normative overlay and a separate non-normative tooling-fixture appendix; neither is the
-checker's byte-for-byte baseline. Consult [VERSIONS.md](../VERSIONS.md) for the map from
-spec areas to affected code.
+Run `tools/check-spec-drift.sh` to compare current upstream EIP-8141 with exact official pin
+`f767a1e8078e17c9b381a91d35a09492189ede1b`. [`spec/EIP8141.md`](../spec/EIP8141.md)
+contains that current-master normative body, the non-normative ML-DSA-44 scheme `0x03`,
+explanatory toolkit notes, and a separate non-normative tooling-fixture appendix; none of
+those local deltas is the checker's byte-for-byte baseline.
+Consult [VERSIONS.md](../VERSIONS.md) for the current stack's map from spec areas to affected
+code.
+
+For rollout planning rather than implementation details, see
+[the migration guide](05-migration.md).

@@ -6,7 +6,7 @@ import {IFrameVm} from "./FrameTest.sol";
 
 /// Shared assertions for the portable-verbatim and patched-builtin spellings
 /// of the minimal Yul account. Both runtimes implement the same one-index
-/// `validate(uint256[])` ABI and keep the owner in slot zero.
+/// `validate(uint256)` ABI and keep the owner in slot zero.
 abstract contract YulAccountTestBase is AccountTestSuite {
     address constant ACCOUNT = address(0xACC2);
     address constant OWNER = address(0x0BEEF);
@@ -41,7 +41,7 @@ abstract contract YulAccountTestBase is AccountTestSuite {
         returns (IFrameVm.FrameTx memory ctx)
     {
         ctx = verifyContext(ACCOUNT, SCOPE_BOTH, bytes32(0));
-        ctx.frames[0].data = validationCalldata(selected(0));
+        ctx.frames[0].data = validationCalldata(0);
         ctx.signatures = new IFrameVm.FrameTxSignature[](1);
         ctx.signatures[0] = secpSig(signer);
         ctx.signatures[0].msgHash = msgHash;
@@ -55,6 +55,28 @@ abstract contract YulAccountTestBase is AccountTestSuite {
     /// protocol accepts the signature, the account rejects the selected signer.
     function test_strangerRefused() public {
         assertRefusesFrame(ACCOUNT, _ctx(STRANGER), "stranger must not approve");
+    }
+
+    /// The policy intentionally trusts the protocol-resolved signer rather than
+    /// restricting the native scheme to secp256k1.
+    function test_p256OwnerApproves() public {
+        IFrameVm.FrameTx memory ctx = _ctx(OWNER);
+        ctx.signatures[0] = p256Sig(OWNER);
+        assertApprovesFrame(ACCOUNT, ctx, "the same resolved owner may use native P256");
+    }
+
+    function test_mldsaOwnerApproves() public {
+        IFrameVm.FrameTx memory ctx = _ctx(OWNER);
+        ctx.signatures[0] = mldsaSig(OWNER);
+        assertApprovesFrame(ACCOUNT, ctx, "the same resolved owner may use native ML-DSA-44");
+    }
+
+    /// ARBITRARY entries have no resolved signer. Asking SIGPARAM for one must
+    /// exceptional-halt rather than treating its zero fixture signer as authority.
+    function test_arbitraryEntryRefused() public {
+        IFrameVm.FrameTx memory ctx = _ctx(OWNER);
+        ctx.signatures[0] = arbitrarySig(hex"01");
+        assertRefusesFrame(ACCOUNT, ctx, "an ARBITRARY witness has no resolved signer");
     }
 
     /// The owner entry is otherwise valid and the canonical-hash control above
@@ -78,27 +100,25 @@ abstract contract YulAccountTestBase is AccountTestSuite {
 
     function test_wrongValidationSelectorRefused() public {
         IFrameVm.FrameTx memory ctx = _ctx(OWNER);
-        ctx.frames[0].data =
-            abi.encodePacked(bytes4(0xDEADBEEF), uint256(0x20), uint256(1), uint256(0));
-        assertRefusesFrame(ACCOUNT, ctx, "validation selector must match the shared account ABI");
+        ctx.frames[0].data = abi.encodePacked(bytes4(0xDEADBEEF), uint256(0));
+        assertRefusesFrame(ACCOUNT, ctx, "validation selector must match validate(uint256)");
     }
 
-    function test_nonCanonicalSignatureArrayOffsetRefused() public {
+    function test_legacyDynamicArrayEncodingRefused() public {
         IFrameVm.FrameTx memory ctx = _ctx(OWNER);
-        ctx.frames[0].data =
-            abi.encodePacked(bytes4(0x25B90494), uint256(0x40), uint256(1), uint256(0));
-        assertRefusesFrame(ACCOUNT, ctx, "signature-index array offset must be canonical");
+        ctx.frames[0].data = abi.encodeWithSelector(bytes4(0x25B90494), selected(0));
+        assertRefusesFrame(ACCOUNT, ctx, "the former validate(uint256[]) ABI must be rejected");
     }
 
-    function test_multipleSelectedSignatureIndicesRefused() public {
+    function test_shortValidationCalldataRefused() public {
         IFrameVm.FrameTx memory ctx = _ctx(OWNER);
-        ctx.frames[0].data = validationCalldata(selected(0, 0));
-        assertRefusesFrame(ACCOUNT, ctx, "minimal Yul account accepts exactly one index");
+        ctx.frames[0].data = abi.encodePacked(bytes4(0xCE4D01A3), bytes31(0));
+        assertRefusesFrame(ACCOUNT, ctx, "validate(uint256) requires all 36 calldata bytes");
     }
 
     function test_trailingValidationCalldataRefused() public {
         IFrameVm.FrameTx memory ctx = _ctx(OWNER);
-        ctx.frames[0].data = bytes.concat(validationCalldata(selected(0)), hex"00");
+        ctx.frames[0].data = bytes.concat(validationCalldata(0), hex"00");
         assertRefusesFrame(ACCOUNT, ctx, "minimal decoder rejects trailing calldata");
     }
 }
@@ -107,7 +127,7 @@ abstract contract YulAccountTestBase is AccountTestSuite {
 /// `verbatim_*` opcodes. This is the runtime object after its 11-byte constructor.
 contract YulAccountTest is YulAccountTestBase {
     bytes constant RUNTIME =
-        hex"36600557005b606436146010575f5ffd5b6325b904945f3560e01c146022575f5ffd5b602060043514602f575f5ffd5b600160243514603c575f5ffd5b6044355f81b4600282b415600ab0600681b3806056575f5ffd5b82845f54141615606557805f5faa5b5f5ffd";
+        hex"36600557005b602436146010575f5ffd5b63ce4d01a35f3560e01c146022575f5ffd5b6004355f81b4600282b415600ab0600681b380603c575f5ffd5b82845f54141615604b57805f5faa5b5f5ffd";
 
     function setUp() public {
         _install(RUNTIME);
@@ -118,7 +138,7 @@ contract YulAccountTest is YulAccountTestBase {
 // with `--experimental --evm-version @future`.
 contract YulBuiltinAccountTest is YulAccountTestBase {
     bytes constant RUNTIME =
-        hex"3615606557606436036061576325b904945f3560e01c03605d5760206004350360595760016024350360555760443560025f82b491b4156006600ab0b39182156051575f541416604d575f80fd5b5f80aa5b5f80fd5b5f80fd5b5f80fd5b5f80fd5b5f80fd5b00";
+        hex"3615604b576024360360475763ce4d01a35f3560e01c0360435760043560025f82b491b4156006600ab0b3918215603f575f541416603b575f80fd5b5f80aa5b5f80fd5b5f80fd5b5f80fd5b00";
 
     function setUp() public {
         _install(RUNTIME);

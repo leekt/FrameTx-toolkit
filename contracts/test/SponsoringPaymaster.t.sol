@@ -3,7 +3,6 @@ pragma solidity ^0.8.24;
 
 import {IFrameVm} from "./FrameTest.sol";
 import {PaymasterTestSuite} from "./PaymasterTestSuite.sol";
-import {IFrameAccount} from "../src/accounts/IFrameAccount.sol";
 
 /// examples/06-paymaster, executed against the real opcodes.
 ///
@@ -50,24 +49,22 @@ contract SponsoringPaymasterTest is PaymasterTestSuite {
         return paymaster;
     }
 
-    function _paymasterTestSignatures()
+    function _paymasterTestSignature()
         internal
         pure
         override
-        returns (IFrameVm.FrameTxSignature[] memory signatures)
+        returns (IFrameVm.FrameTxSignature memory signature)
     {
-        signatures = new IFrameVm.FrameTxSignature[](1);
-        signatures[0] = secpSig(SPONSOR);
+        signature = secpSig(SPONSOR);
     }
 
-    function _paymasterTestCall(uint256[] memory signatureIndices)
+    function _paymasterTestCall(uint256 signatureIndex)
         internal
         pure
         override
         returns (bytes memory)
     {
-        require(signatureIndices.length == 1, "SponsoringPaymaster selects one signature");
-        return abi.encodeWithSignature("sponsorTransaction(uint256)", signatureIndices[0]);
+        return abi.encodeWithSignature("sponsorTransaction(uint256)", signatureIndex);
     }
 
     function _paymasterTestMaxCost() internal pure override returns (uint256) {
@@ -82,9 +79,6 @@ contract SponsoringPaymasterTest is PaymasterTestSuite {
         view
         returns (IFrameVm.FrameTx memory ctx)
     {
-        uint256[] memory senderSignatureIndices = new uint256[](1);
-        senderSignatureIndices[0] = 0;
-
         IFrameVm.FrameTxFrame[] memory frames = new IFrameVm.FrameTxFrame[](3);
         frames[0] = IFrameVm.FrameTxFrame({
             mode: MODE_VERIFY,
@@ -93,7 +87,7 @@ contract SponsoringPaymasterTest is PaymasterTestSuite {
             gasLimit: 100_000,
             stateGasLimit: 0,
             value: 0,
-            data: abi.encodeWithSelector(IFrameAccount.validate.selector, senderSignatureIndices),
+            data: abi.encodeWithSignature("validate(uint256)", uint256(0)),
             // Documents the preceding successful execution approval. The synthetic
             // fixture does not persist sender_approved across separate calls.
             status: 1,
@@ -206,6 +200,12 @@ contract SponsoringPaymasterTest is PaymasterTestSuite {
     function test_p256SchemeRefused() public {
         IFrameVm.FrameTx memory ctx = _payCtx();
         ctx.signatures[SPONSOR_SIG].scheme = 2;
+        assertRefusesFrame(paymaster, ctx, "this paymaster accepts SECP256K1 only");
+    }
+
+    function test_mldsaSchemeRefused() public {
+        IFrameVm.FrameTx memory ctx = _payCtx();
+        ctx.signatures[SPONSOR_SIG] = mldsaSig(SPONSOR);
         assertRefusesFrame(paymaster, ctx, "this paymaster accepts SECP256K1 only");
     }
 

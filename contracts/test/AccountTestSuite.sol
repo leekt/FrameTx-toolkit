@@ -2,7 +2,6 @@
 pragma solidity ^0.8.24;
 
 import {FrameTest, IFrameVm} from "./FrameTest.sol";
-import {IFrameAccount} from "../src/accounts/IFrameAccount.sol";
 
 /// Reusable conformance tests for an EIP-8141 account implementation.
 ///
@@ -100,14 +99,24 @@ abstract contract AccountTestSuite is FrameTest {
         indices[2] = c;
     }
 
-    /// Encode the shared account ABI explicitly. Keeping this in one helper
-    /// prevents a test from silently falling through an account's receive path.
-    function validationCalldata(uint256[] memory signatureIndices)
+    /// Encode the standard account ABI explicitly. Every non-multisig account
+    /// receives exactly one envelope index. Multisig overrides this hook and
+    /// expands the first contiguous authorization index into its threshold set.
+    function validationCalldata(uint256 signatureIndex) internal pure returns (bytes memory) {
+        return abi.encodeWithSignature("validate(uint256)", signatureIndex);
+    }
+
+    function accountValidationCalldata(uint256 signatureIndex)
         internal
-        pure
+        view
+        virtual
         returns (bytes memory)
     {
-        return abi.encodeWithSelector(IFrameAccount.validate.selector, signatureIndices);
+        require(
+            accountAuthorizationSignatures().length == 1,
+            "single-signature account must expose one authorization entry"
+        );
+        return validationCalldata(signatureIndex);
     }
 
     /// A threshold-sized stranger block precedes the account's selected entries.
@@ -116,7 +125,7 @@ abstract contract AccountTestSuite is FrameTest {
     function conformanceSignatures()
         internal
         view
-        returns (IFrameVm.FrameTxSignature[] memory signatures, uint256[] memory accountIndices)
+        returns (IFrameVm.FrameTxSignature[] memory signatures, uint256 firstAuthorizationIndex)
     {
         IFrameVm.FrameTxSignature[] memory authorization = accountAuthorizationSignatures();
         IFrameVm.FrameTxSignature[] memory unauthorized = accountUnauthorizedSignatures();
@@ -125,14 +134,16 @@ abstract contract AccountTestSuite is FrameTest {
         require(unauthorized.length == n, "suite requires matching unauthorized signatures");
 
         signatures = new IFrameVm.FrameTxSignature[](n * 2);
-        accountIndices = new uint256[](n);
+        firstAuthorizationIndex = n;
         for (uint256 i = 0; i < n; ++i) {
             signatures[i] = unauthorized[i];
-
-            uint256 sigIndex = n + i;
-            signatures[sigIndex] = authorization[i];
-            accountIndices[i] = sigIndex;
+            signatures[firstAuthorizationIndex + i] = authorization[i];
         }
+    }
+
+    function conformanceValidationCalldata() internal view returns (bytes memory) {
+        (, uint256 firstAuthorizationIndex) = conformanceSignatures();
+        return accountValidationCalldata(firstAuthorizationIndex);
     }
 
     /// Pick distinct distractor signers which do not collide with any signer
@@ -164,14 +175,6 @@ abstract contract AccountTestSuite is FrameTest {
             }
             if (!collision) return result;
             result = address(uint160(result) + 1);
-        }
-    }
-
-    function strangerIndices() internal view returns (uint256[] memory indices) {
-        uint256 signatureCount = accountAuthorizationSignatures().length;
-        indices = new uint256[](signatureCount);
-        for (uint256 i = 0; i < signatureCount; ++i) {
-            indices[i] = i;
         }
     }
 
@@ -209,7 +212,7 @@ abstract contract AccountTestSuite is FrameTest {
         });
     }
 
-    function selfPayContext(uint256[] memory signatureIndices)
+    function selfPayContext(bytes memory accountCallData)
         internal
         view
         returns (IFrameVm.FrameTx memory ctx)
@@ -217,14 +220,14 @@ abstract contract AccountTestSuite is FrameTest {
         address account = accountUnderTest();
         ctx = verifyContext(account, SCOPE_BOTH, accountSuiteSigHash());
         ctx.frames = new IFrameVm.FrameTxFrame[](2);
-        ctx.frames[0] = verifyFrame(account, SCOPE_BOTH, validationCalldata(signatureIndices), 0);
+        ctx.frames[0] = verifyFrame(account, SCOPE_BOTH, accountCallData, 0);
         ctx.frames[1] = senderFrame();
         (ctx.signatures,) = conformanceSignatures();
         ctx.maxCost = SUITE_MAX_COST;
         ctx.approvableScopes = SCOPE_BOTH;
     }
 
-    function sponsoredContext(uint256[] memory signatureIndices, address paymaster)
+    function sponsoredContext(bytes memory accountCallData, address paymaster)
         internal
         view
         returns (IFrameVm.FrameTx memory ctx)
@@ -232,8 +235,7 @@ abstract contract AccountTestSuite is FrameTest {
         address account = accountUnderTest();
         ctx = verifyContext(account, SCOPE_EXECUTION, accountSuiteSigHash());
         ctx.frames = new IFrameVm.FrameTxFrame[](3);
-        ctx.frames[0] =
-            verifyFrame(account, SCOPE_EXECUTION, validationCalldata(signatureIndices), 0);
+        ctx.frames[0] = verifyFrame(account, SCOPE_EXECUTION, accountCallData, 0);
         ctx.frames[1] = verifyFrame(
             paymaster,
             SCOPE_PAYMENT,
@@ -249,7 +251,7 @@ abstract contract AccountTestSuite is FrameTest {
         ctx.approvableScopes = SCOPE_EXECUTION;
     }
 
-    function paysOtherSenderContext(uint256[] memory signatureIndices)
+    function paysOtherSenderContext(bytes memory accountCallData)
         internal
         view
         returns (IFrameVm.FrameTx memory ctx)
@@ -260,13 +262,8 @@ abstract contract AccountTestSuite is FrameTest {
         ctx.sender = otherSender;
         ctx.frameIndex = 1;
         ctx.frames = new IFrameVm.FrameTxFrame[](3);
-        ctx.frames[0] = verifyFrame(
-            otherSender,
-            SCOPE_EXECUTION,
-            abi.encodeWithSelector(IFrameAccount.validate.selector, selected(0)),
-            1
-        );
-        ctx.frames[1] = verifyFrame(account, SCOPE_PAYMENT, validationCalldata(signatureIndices), 0);
+        ctx.frames[0] = verifyFrame(otherSender, SCOPE_EXECUTION, validationCalldata(0), 1);
+        ctx.frames[1] = verifyFrame(account, SCOPE_PAYMENT, accountCallData, 0);
         ctx.frames[2] = senderFrame();
         (ctx.signatures,) = conformanceSignatures();
         // Make the already-successful sender VERIFY frame internally coherent.
@@ -278,24 +275,24 @@ abstract contract AccountTestSuite is FrameTest {
 
     function test_accountSuite_verifiesAndPaysForItself() public {
         vm.deal(accountUnderTest(), SUITE_MAX_COST);
-        (, uint256[] memory accountIndices) = conformanceSignatures();
-        IFrameVm.FrameTx memory ctx = selfPayContext(accountIndices);
+        bytes memory accountCallData = conformanceValidationCalldata();
+        IFrameVm.FrameTx memory ctx = selfPayContext(accountCallData);
         assertEq(ctx.frames[0].flags, SCOPE_BOTH, "self frame must permit exactly BOTH");
 
         ctx.approvableScopes = SCOPE_PAYMENT;
         assertRefusesFrame(
             accountUnderTest(), ctx, "self relay must request BOTH, not PAYMENT only"
         );
-        ctx = selfPayContext(accountIndices);
+        ctx = selfPayContext(accountCallData);
         ctx.approvableScopes = SCOPE_EXECUTION;
         assertRefusesFrame(
             accountUnderTest(), ctx, "self relay must request BOTH, not EXECUTION only"
         );
-        ctx = selfPayContext(accountIndices);
+        ctx = selfPayContext(accountCallData);
         ctx.approvableScopes = SCOPE_NONE;
         assertRefusesFrame(accountUnderTest(), ctx, "self relay must execute APPROVE(BOTH)");
 
-        ctx = selfPayContext(accountIndices);
+        ctx = selfPayContext(accountCallData);
         assertEq(ctx.approvableScopes, SCOPE_BOTH, "host scope must be exactly BOTH");
         assertApprovesFrame(accountUnderTest(), ctx, "account must verify and pay for itself");
     }
@@ -306,8 +303,8 @@ abstract contract AccountTestSuite is FrameTest {
         );
         vm.deal(accountUnderTest(), 0);
         vm.deal(paymaster, SUITE_MAX_COST);
-        (, uint256[] memory accountIndices) = conformanceSignatures();
-        IFrameVm.FrameTx memory ctx = sponsoredContext(accountIndices, paymaster);
+        bytes memory accountCallData = conformanceValidationCalldata();
+        IFrameVm.FrameTx memory ctx = sponsoredContext(accountCallData, paymaster);
         assertEq(
             ctx.frames[0].flags, SCOPE_EXECUTION, "account frame must permit exactly EXECUTION"
         );
@@ -319,7 +316,7 @@ abstract contract AccountTestSuite is FrameTest {
         assertRefusesFrame(
             accountUnderTest(), ctx, "sponsored relay must execute APPROVE(EXECUTION)"
         );
-        ctx = sponsoredContext(accountIndices, paymaster);
+        ctx = sponsoredContext(accountCallData, paymaster);
         assertEq(ctx.approvableScopes, SCOPE_EXECUTION, "host scope must be exactly EXECUTION");
         assertApprovesFrame(
             accountUnderTest(), ctx, "account must verify execution while a later paymaster pays"
@@ -342,8 +339,8 @@ abstract contract AccountTestSuite is FrameTest {
         vm.store(otherSender, bytes32(0), bytes32(uint256(uint160(otherSender))));
         vm.deal(otherSender, 0);
         vm.deal(accountUnderTest(), SUITE_MAX_COST);
-        (, uint256[] memory accountIndices) = conformanceSignatures();
-        IFrameVm.FrameTx memory ctx = paysOtherSenderContext(accountIndices);
+        bytes memory accountCallData = conformanceValidationCalldata();
+        IFrameVm.FrameTx memory ctx = paysOtherSenderContext(accountCallData);
         assertTrue(ctx.sender != accountUnderTest(), "payment beneficiary must be another sender");
         assertEq(ctx.frames[1].flags, SCOPE_PAYMENT, "payer frame must permit exactly PAYMENT");
 
@@ -365,7 +362,7 @@ abstract contract AccountTestSuite is FrameTest {
     }
 
     function test_accountSuite_signatureRoutingIgnoresUnselectedValidAuthorization() public {
-        IFrameVm.FrameTx memory ctx = selfPayContext(strangerIndices());
+        IFrameVm.FrameTx memory ctx = selfPayContext(accountValidationCalldata(0));
         assertRefusesFrame(
             accountUnderTest(),
             ctx,
@@ -373,20 +370,11 @@ abstract contract AccountTestSuite is FrameTest {
         );
     }
 
-    function test_accountSuite_emptySignatureSelectionIsRefused() public {
-        uint256[] memory noIndices = new uint256[](0);
-        assertRefusesFrame(
-            accountUnderTest(),
-            selfPayContext(noIndices),
-            "an empty signature selection must not authorize the account"
-        );
-    }
-
     function test_accountSuite_outOfRangeSignatureSelectionIsRefused() public {
         (IFrameVm.FrameTxSignature[] memory signatures,) = conformanceSignatures();
         assertRefusesFrame(
             accountUnderTest(),
-            selfPayContext(selected(signatures.length)),
+            selfPayContext(accountValidationCalldata(signatures.length)),
             "an out-of-range signature index must not authorize the account"
         );
     }

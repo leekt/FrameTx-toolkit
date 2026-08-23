@@ -8,8 +8,7 @@ Both variants implement the same validation contract:
 
 - empty calldata succeeds as a receive-like ETH-funding path;
 - non-empty calldata must be the canonical ABI encoding of
-  `validate(uint256[] signatureIndices)` (selector `0x25b90494`);
-- the array must contain exactly one signature index;
+  `validate(uint256 signatureIndex)` (selector `0xce4d01a3`);
 - that selected entry must resolve to the owner in storage slot 0 and must have signed the
   canonical transaction hash; and
 - approval scope is derived from the current frame's `allowed_scope` rather than hardcoded.
@@ -18,18 +17,15 @@ There is no initializer. A factory must seed slot 0 or add constructor logic.
 
 ## Exact calldata accepted
 
-The validation calldata is exactly 100 bytes (`0x64`):
+The validation calldata is exactly 36 bytes (`0x24`):
 
 | Offset | Size | Value |
 |---|---:|---|
-| `0x00` | 4 | selector `0x25b90494` |
-| `0x04` | 32 | dynamic-array offset `0x20` |
-| `0x24` | 32 | array length `1` |
-| `0x44` | 32 | selected `signatureIndex` |
+| `0x00` | 4 | selector `0xce4d01a3` |
+| `0x04` | 32 | selected `signatureIndex` |
 
-Malformed offsets, a zero- or multi-element array, trailing calldata, or another selector
-revert. This deliberately tiny decoder is stricter than Solidity's general ABI decoder.
-Empty calldata takes a separate `STOP` path so plain ETH transfers can fund the account.
+Trailing calldata, a short argument, or another selector reverts. Empty calldata takes a
+separate `STOP` path so plain ETH transfers can fund the account.
 
 The selected index is routing data, not authority by itself. The VERIFY frame's calldata is
 part of the frame list covered by `compute_sig_hash(tx)`, so a canonical owner signature
@@ -42,7 +38,7 @@ Conceptually, the runtime does:
 
 ```text
 if calldata is empty: succeed (funding)
-decode exactly one signatureIndex from validate(uint256[])
+decode signatureIndex from validate(uint256)
 signer       := SIGPARAM(signatureIndex, 0x00)
 signedThisTx := SIGPARAM(signatureIndex, 0x02) == 0
 frameIndex   := TXPARAM(0x0a)
@@ -52,16 +48,18 @@ if signer == SLOAD(0) && signedThisTx && scope != 0:
 revert
 ```
 
-The protocol already verified every `SECP256K1` and `P256` signature before the frame ran.
-The account only checks the resulting signer and message selection. Zero for signature
-parameter `0x02` is the reserved EVM representation of an empty `msg`, meaning the protocol
-verified `compute_sig_hash(tx)` rather than an unrelated explicit digest.
+The protocol already verified every supported native signature before the frame ran:
+`SECP256K1`, `P256`, and this toolkit's non-normative ML-DSA-44 scheme `0x03`. The account
+only checks the resulting signer and message selection. Zero for signature parameter `0x02`
+is the reserved EVM representation of an empty `msg`, meaning the protocol verified
+`compute_sig_hash(tx)` rather than an unrelated explicit digest.
 
 This minimal example does not check the scheme before requesting `resolved_signer`.
-`SECP256K1` and `P256` can both authorize if they resolve to the stored owner. Selecting an
-`ARBITRARY` entry exceptional-halts because that scheme has no resolved signer, which is a
-fatal validation failure. The Solidity examples filter that case explicitly for cleaner
-control flow.
+All three native schemes can authorize if they resolve to the stored owner. For ML-DSA-44,
+slot 0 must contain `low20(keccak256(0x03 || publicKey))`; the exact experimental wire is in
+[`10-pq.md`](10-pq.md). Selecting an `ARBITRARY` entry exceptional-halts because that scheme
+has no resolved signer, which is a fatal validation failure. The Solidity examples filter
+that case explicitly for cleaner control flow.
 
 ## One runtime, three approval roles
 
@@ -157,13 +155,13 @@ on a fixed size quoted in documentation.
 `test/YulAccount.t.sol` defines one `AccountTestSuite`-based test base and runs it against
 both the portable-verbatim and patched-builtin runtimes. Each inherits the three role tests,
 shifted selected-index routing, exact-scope checks, and empty-calldata funding coverage, in
-addition to Yul-specific signer, explicit-digest, wrong-selector, non-canonical-offset,
-multi-index, trailing-calldata, empty-selection, and out-of-range-index cases.
+addition to Yul-specific signer, explicit-digest, wrong-selector, malformed-length,
+trailing-calldata, and out-of-range-index cases.
 
 ## Deliberate omissions
 
-- Exactly one selected signature is supported; use a Solidity account for multi-key routing
-  or richer policy.
+- Exactly one selected signature is supported; use `MultisigAccount` for multi-signature
+  aggregation or a custom Solidity account for richer policy.
 - There is no owner rotation or `execute()` function. `SENDER` frames call operation targets
   directly with `caller == tx.sender`.
 - There is no explicit max-cost policy. A selected owner signature covers the fees and frame

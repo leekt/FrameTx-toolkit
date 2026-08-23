@@ -2,13 +2,12 @@
 pragma solidity ^0.8.24;
 
 import {FrameTest, IFrameVm} from "./FrameTest.sol";
-import {IFrameAccount} from "../src/accounts/IFrameAccount.sol";
 import {Base64Url} from "../src/crypto/Base64Url.sol";
 
 /// Reusable conformance tests for a paymaster.
 ///
-/// A concrete paymaster test supplies its deployed target, the signature entries
-/// that authorise sponsorship, and the calldata which selects those entries. Its
+/// A concrete paymaster test supplies its deployed target, the signature entry
+/// that authorises sponsorship, and the calldata which selects that entry. Its
 /// `setUp` must leave the paymaster able to approve `_paymasterTestMaxCost()`.
 ///
 /// Each positive case drives both VERIFY frames from the same three-frame
@@ -16,9 +15,9 @@ import {Base64Url} from "../src/crypto/Base64Url.sol";
 ///
 ///   account VERIFY (EXECUTION) -> paymaster VERIFY (PAYMENT) -> SENDER
 ///
-/// Each account case supplies a signature prefix and explicit selected indices;
-/// the paymaster entries are appended after that prefix and receive the matching
-/// dynamically shifted indices. This proves that neither frame assumes its
+/// Each account case supplies a signature prefix and its exact validation calldata;
+/// the paymaster entry is appended after that prefix and receives the matching
+/// dynamically shifted index. This proves that neither frame assumes its
 /// signatures begin at zero.
 ///
 /// These are opcode-level approval tests, not end-to-end transaction accounting
@@ -52,17 +51,19 @@ abstract contract PaymasterTestSuite is FrameTest {
         address account;
         /// Account-side entries already positioned at their transaction indices.
         IFrameVm.FrameTxSignature[] signaturePrefix;
-        /// Entries from `signaturePrefix` selected by validate(uint256[]).
-        uint256[] accountSignatureIndices;
+        /// Exact account VERIFY calldata; only multisig carries a uint256[].
+        bytes accountCallData;
+        /// One valid account entry reused by the paymaster misrouting negative.
+        uint256 accountSignatureIndex;
     }
 
     // Fresh runtimes for contracts/src/accounts/account.yul and
     // contracts/src/accounts/account-builtins.yul, respectively. Both expose
-    // validate(uint256[]) and read their sole selected index from calldata.
+    // validate(uint256) and read their selected index from calldata.
     bytes private constant PORTABLE_YUL_RUNTIME =
-        hex"36600557005b606436146010575f5ffd5b6325b904945f3560e01c146022575f5ffd5b602060043514602f575f5ffd5b600160243514603c575f5ffd5b6044355f81b4600282b415600ab0600681b3806056575f5ffd5b82845f54141615606557805f5faa5b5f5ffd";
+        hex"36600557005b602436146010575f5ffd5b63ce4d01a35f3560e01c146022575f5ffd5b6004355f81b4600282b415600ab0600681b380603c575f5ffd5b82845f54141615604b57805f5faa5b5f5ffd";
     bytes private constant BUILTIN_YUL_RUNTIME =
-        hex"3615606557606436036061576325b904945f3560e01c03605d5760206004350360595760016024350360555760443560025f82b491b4156006600ab0b39182156051575f541416604d575f80fd5b5f80aa5b5f80fd5b5f80fd5b5f80fd5b5f80fd5b5f80fd5b00";
+        hex"3615604b576024360360475763ce4d01a35f3560e01c0360435760043560025f82b491b4156006600ab0b3918215603f575f541416603b575f80fd5b5f80aa5b5f80fd5b5f80fd5b5f80fd5b00";
 
     /// The deployed paymaster under test.
     function _paymasterUnderTest() internal view virtual returns (address);
@@ -81,19 +82,15 @@ abstract contract PaymasterTestSuite is FrameTest {
         return DEFAULT_SENDER_TARGET;
     }
 
-    /// The native or contract-verified entries that satisfy the paymaster's policy.
-    function _paymasterTestSignatures()
+    /// The native or contract-verified entry that satisfies the paymaster's policy.
+    function _paymasterTestSignature()
         internal
         view
         virtual
-        returns (IFrameVm.FrameTxSignature[] memory);
+        returns (IFrameVm.FrameTxSignature memory);
 
-    /// Calldata for the paymaster VERIFY frame, selecting its envelope entries.
-    function _paymasterTestCall(uint256[] memory signatureIndices)
-        internal
-        view
-        virtual
-        returns (bytes memory);
+    /// Calldata for the paymaster VERIFY frame, selecting its envelope entry.
+    function _paymasterTestCall(uint256 signatureIndex) internal view virtual returns (bytes memory);
 
     /// A max-cost fixture accepted by the configured paymaster.
     function _paymasterTestMaxCost() internal view virtual returns (uint256);
@@ -105,18 +102,8 @@ abstract contract PaymasterTestSuite is FrameTest {
 
     function _differentFromPaymaster(uint160 candidate) private view returns (address result) {
         result = address(candidate);
-        IFrameVm.FrameTxSignature[] memory paymasterSignatures = _paymasterTestSignatures();
-        bool collided = true;
-        while (collided) {
-            collided = false;
-            for (uint256 i = 0; i < paymasterSignatures.length; ++i) {
-                if (result == paymasterSignatures[i].signer) {
-                    result = address(uint160(result) + 1);
-                    collided = true;
-                    break;
-                }
-            }
-        }
+        address paymasterSigner = _paymasterTestSignature().signer;
+        while (result == paymasterSigner) result = address(uint160(result) + 1);
     }
 
     function _suiteOwnerA() private view returns (address) {
@@ -142,9 +129,8 @@ abstract contract PaymasterTestSuite is FrameTest {
         }
     }
 
-    function _singleIndex(uint256 index) private pure returns (uint256[] memory indices) {
-        indices = new uint256[](1);
-        indices[0] = index;
+    function _singleAccountCall(uint256 signatureIndex) private pure returns (bytes memory) {
+        return abi.encodeWithSignature("validate(uint256)", signatureIndex);
     }
 
     function _multisigIndices() private pure returns (uint256[] memory indices) {
@@ -153,32 +139,16 @@ abstract contract PaymasterTestSuite is FrameTest {
         indices[1] = 2;
     }
 
-    function _paymasterIndices(uint256 accountPrefixLength)
-        private
-        view
-        returns (uint256[] memory indices)
-    {
-        uint256 count = _paymasterTestSignatures().length;
-        indices = new uint256[](count);
-        for (uint256 i = 0; i < count; ++i) {
-            indices[i] = accountPrefixLength + i;
-        }
-    }
-
     function _sharedSignatures(IFrameVm.FrameTxSignature[] memory accountPrefix)
         private
         view
         returns (IFrameVm.FrameTxSignature[] memory signatures)
     {
-        IFrameVm.FrameTxSignature[] memory paymasterSignatures = _paymasterTestSignatures();
-        signatures =
-            new IFrameVm.FrameTxSignature[](accountPrefix.length + paymasterSignatures.length);
+        signatures = new IFrameVm.FrameTxSignature[](accountPrefix.length + 1);
         for (uint256 i = 0; i < accountPrefix.length; ++i) {
             signatures[i] = accountPrefix[i];
         }
-        for (uint256 i = 0; i < paymasterSignatures.length; ++i) {
-            signatures[accountPrefix.length + i] = paymasterSignatures[i];
-        }
+        signatures[accountPrefix.length] = _paymasterTestSignature();
     }
 
     function _sponsoredContext(SponsoredAccountCase memory accountCase)
@@ -195,9 +165,7 @@ abstract contract PaymasterTestSuite is FrameTest {
             gasLimit: 300_000,
             stateGasLimit: 0,
             value: 0,
-            data: abi.encodeWithSelector(
-                IFrameAccount.validate.selector, accountCase.accountSignatureIndices
-            ),
+            data: accountCase.accountCallData,
             status: 0,
             executionGasUsed: 0,
             stateGasUsed: 0
@@ -209,7 +177,7 @@ abstract contract PaymasterTestSuite is FrameTest {
             gasLimit: 200_000,
             stateGasLimit: 0,
             value: 0,
-            data: _paymasterTestCall(_paymasterIndices(prefixLength)),
+            data: _paymasterTestCall(prefixLength),
             status: 0,
             executionGasUsed: 0,
             stateGasUsed: 0
@@ -284,7 +252,7 @@ abstract contract PaymasterTestSuite is FrameTest {
         assertApprovesFrame(_paymasterUnderTest(), ctx, paymasterReason);
     }
 
-    function _defaultAccountCase(address account, uint256[] memory selectedIndices)
+    function _defaultAccountCase(address account, bytes memory accountCallData)
         private
         view
         returns (SponsoredAccountCase memory accountCase)
@@ -294,13 +262,16 @@ abstract contract PaymasterTestSuite is FrameTest {
         prefix[1] = secpSig(_suiteOwnerA());
         prefix[2] = secpSig(_suiteOwnerB());
         accountCase = SponsoredAccountCase({
-            account: account, signaturePrefix: prefix, accountSignatureIndices: selectedIndices
+            account: account,
+            signaturePrefix: prefix,
+            accountCallData: accountCallData,
+            accountSignatureIndex: 1
         });
     }
 
     function _ownerAccountCase() private returns (SponsoredAccountCase memory accountCase) {
         address account = deployAccountWithArgs("OwnerAccount", abi.encode(_suiteOwnerA()));
-        return _defaultAccountCase(account, _singleIndex(1));
+        return _defaultAccountCase(account, _singleAccountCall(1));
     }
 
     function _multisigAccountCase() private returns (SponsoredAccountCase memory accountCase) {
@@ -309,14 +280,16 @@ abstract contract PaymasterTestSuite is FrameTest {
         owners[1] = _suiteOwnerB();
         owners[2] = address(0x3333);
         address account = deployAccountWithArgs("MultisigAccount", abi.encode(owners, uint256(2)));
-        return _defaultAccountCase(account, _multisigIndices());
+        return _defaultAccountCase(
+            account, abi.encodeWithSignature("validate(uint256[])", _multisigIndices())
+        );
     }
 
     function _sessionKeyAccountCase() private returns (SponsoredAccountCase memory accountCase) {
         // The suite deliberately uses the owner path, which is unconditional;
         // session-key expiry and allowlist behavior belongs to the account suite.
         address account = deployAccountWithArgs("SessionKeyAccount", abi.encode(_suiteOwnerA()));
-        return _defaultAccountCase(account, _singleIndex(1));
+        return _defaultAccountCase(account, _singleAccountCall(1));
     }
 
     function _p256ResolvedSigner() private pure returns (address) {
@@ -327,14 +300,17 @@ abstract contract PaymasterTestSuite is FrameTest {
         address account = deployAccountWithArgs("P256Account", abi.encode(P256_QX, P256_QY));
 
         // Unlike the legacy cases, this prefix intentionally has length two.
-        // The paymaster indices must therefore begin at two, proving the append
+        // The paymaster index must therefore be two, proving the append
         // logic is derived from the case rather than a fixed offset of three.
         IFrameVm.FrameTxSignature[] memory prefix = new IFrameVm.FrameTxSignature[](2);
         address trustedSigner = _p256ResolvedSigner();
         prefix[0] = p256Sig(_differentFromPaymasterAnd(trustedSigner, 0xD256));
         prefix[1] = p256Sig(trustedSigner);
         accountCase = SponsoredAccountCase({
-            account: account, signaturePrefix: prefix, accountSignatureIndices: _singleIndex(1)
+            account: account,
+            signaturePrefix: prefix,
+            accountCallData: _singleAccountCall(1),
+            accountSignatureIndex: 1
         });
     }
 
@@ -380,7 +356,52 @@ abstract contract PaymasterTestSuite is FrameTest {
         prefix[0] = arbitrarySig(_webAuthnAssertion(WEBAUTHN_OTHER_CREDENTIAL_KEY, rpIdHash));
         prefix[1] = arbitrarySig(_webAuthnAssertion(WEBAUTHN_CREDENTIAL_KEY, rpIdHash));
         accountCase = SponsoredAccountCase({
-            account: account, signaturePrefix: prefix, accountSignatureIndices: _singleIndex(1)
+            account: account,
+            signaturePrefix: prefix,
+            accountCallData: _singleAccountCall(1),
+            accountSignatureIndex: 1
+        });
+    }
+
+    function _mldsaPublicKey(uint256 seed) private pure returns (bytes memory key) {
+        key = new bytes(1_312);
+        for (uint256 i; i < key.length; ++i) {
+            key[i] = bytes1(uint8((seed + i) & 0xff));
+        }
+    }
+
+    function _mldsaSigner(bytes memory publicKey) private pure returns (address) {
+        return address(uint160(uint256(keccak256(abi.encodePacked(bytes1(0x03), publicKey)))));
+    }
+
+    function _mldsaAccountCase() private returns (SponsoredAccountCase memory accountCase) {
+        address paymasterSigner = _paymasterTestSignature().signer;
+
+        uint256 trustedSeed = 0x44;
+        bytes memory trustedKey = _mldsaPublicKey(trustedSeed);
+        address trustedSigner = _mldsaSigner(trustedKey);
+        while (trustedSigner == paymasterSigner) {
+            trustedKey = _mldsaPublicKey(++trustedSeed);
+            trustedSigner = _mldsaSigner(trustedKey);
+        }
+
+        uint256 otherSeed = 0xa5;
+        bytes memory otherKey = _mldsaPublicKey(otherSeed);
+        address otherSigner = _mldsaSigner(otherKey);
+        while (otherSigner == trustedSigner || otherSigner == paymasterSigner) {
+            otherKey = _mldsaPublicKey(++otherSeed);
+            otherSigner = _mldsaSigner(otherKey);
+        }
+
+        address account = deployAccountWithArgs("MLDSAAccount", abi.encode(trustedKey));
+        IFrameVm.FrameTxSignature[] memory prefix = new IFrameVm.FrameTxSignature[](2);
+        prefix[0] = mldsaSig(otherSigner);
+        prefix[1] = mldsaSig(trustedSigner);
+        accountCase = SponsoredAccountCase({
+            account: account,
+            signaturePrefix: prefix,
+            accountCallData: _singleAccountCall(1),
+            accountSignatureIndex: 1
         });
     }
 
@@ -395,7 +416,7 @@ abstract contract PaymasterTestSuite is FrameTest {
         _assertAccountThenPaymasterApprove(
             _sponsoredContext(accountCase),
             "owner account must approve execution from shifted signature index 1",
-            "paymaster must sponsor the owner account from indices beginning at 3"
+            "paymaster must sponsor the owner account from shifted index 3"
         );
     }
 
@@ -405,7 +426,7 @@ abstract contract PaymasterTestSuite is FrameTest {
         _assertAccountThenPaymasterApprove(
             _sponsoredContext(accountCase),
             "multisig must approve execution from shifted signature indices 1 and 2",
-            "paymaster must sponsor the multisig account from indices beginning at 3"
+            "paymaster must sponsor the multisig account from shifted index 3"
         );
     }
 
@@ -415,7 +436,7 @@ abstract contract PaymasterTestSuite is FrameTest {
         _assertAccountThenPaymasterApprove(
             _sponsoredContext(accountCase),
             "session-key account owner must approve execution from shifted signature index 1",
-            "paymaster must sponsor the session-key account from indices beginning at 3"
+            "paymaster must sponsor the session-key account from shifted index 3"
         );
     }
 
@@ -423,11 +444,12 @@ abstract contract PaymasterTestSuite is FrameTest {
         address account = _paymasterSuitePortableYulAccount();
         _installYulAccount(account, PORTABLE_YUL_RUNTIME);
         _preparePaymasterForAccount(account);
-        SponsoredAccountCase memory accountCase = _defaultAccountCase(account, _singleIndex(1));
+        SponsoredAccountCase memory accountCase =
+            _defaultAccountCase(account, _singleAccountCall(1));
         _assertAccountThenPaymasterApprove(
             _sponsoredContext(accountCase),
             "portable Yul account must approve execution from shifted signature index 1",
-            "paymaster must sponsor the portable Yul account from indices beginning at 3"
+            "paymaster must sponsor the portable Yul account from shifted index 3"
         );
     }
 
@@ -435,11 +457,12 @@ abstract contract PaymasterTestSuite is FrameTest {
         address account = _paymasterSuiteBuiltinYulAccount();
         _installYulAccount(account, BUILTIN_YUL_RUNTIME);
         _preparePaymasterForAccount(account);
-        SponsoredAccountCase memory accountCase = _defaultAccountCase(account, _singleIndex(1));
+        SponsoredAccountCase memory accountCase =
+            _defaultAccountCase(account, _singleAccountCall(1));
         _assertAccountThenPaymasterApprove(
             _sponsoredContext(accountCase),
             "builtin Yul account must approve execution from shifted signature index 1",
-            "paymaster must sponsor the builtin Yul account from indices beginning at 3"
+            "paymaster must sponsor the builtin Yul account from shifted index 3"
         );
     }
 
@@ -449,7 +472,7 @@ abstract contract PaymasterTestSuite is FrameTest {
         _assertAccountThenPaymasterApprove(
             _sponsoredContext(accountCase),
             "P256 account must approve execution from synthetic scheme-2 signature index 1",
-            "paymaster must sponsor the P256 account from indices beginning at 2"
+            "paymaster must sponsor the P256 account from shifted index 2"
         );
     }
 
@@ -459,7 +482,17 @@ abstract contract PaymasterTestSuite is FrameTest {
         _assertAccountThenPaymasterApprove(
             _sponsoredContext(accountCase),
             "WebAuthn account must approve execution from configured credential at index 1",
-            "paymaster must sponsor the WebAuthn account from indices beginning at 2"
+            "paymaster must sponsor the WebAuthn account from shifted index 2"
+        );
+    }
+
+    function test_paymasterConformance_sponsorsMLDSAAccount() public {
+        SponsoredAccountCase memory accountCase = _mldsaAccountCase();
+        _preparePaymasterForAccount(accountCase.account);
+        _assertAccountThenPaymasterApprove(
+            _sponsoredContext(accountCase),
+            "ML-DSA-44 account must approve execution from native scheme-3 index 1",
+            "paymaster must sponsor the ML-DSA-44 account from shifted index 2"
         );
     }
 
@@ -467,13 +500,10 @@ abstract contract PaymasterTestSuite is FrameTest {
         SponsoredAccountCase memory accountCase = _ownerAccountCase();
         address account = accountCase.account;
         _preparePaymasterForAccount(account);
-        uint256 paymasterSignatureCount = _paymasterTestSignatures().length;
-        if (paymasterSignatureCount == 0) return;
-
         IFrameVm.FrameTx memory ctx = _sponsoredContext(accountCase);
 
         // Prove the account route remains valid, then misroute the paymaster to
-        // that account entry instead of its own entries after the account prefix.
+        // that account entry instead of its own entry after the account prefix.
         ctx.frameIndex = 0;
         ctx.approvableScopes = SCOPE_NONE;
         assertRefusesFrame(account, ctx, "account must require its execution approval scope");
@@ -481,11 +511,7 @@ abstract contract PaymasterTestSuite is FrameTest {
         ctx.approvableScopes = SCOPE_EXECUTION;
         assertApprovesFrame(account, ctx, "account signature index 1 must remain valid");
 
-        uint256[] memory wrongIndices = new uint256[](paymasterSignatureCount);
-        for (uint256 i = 0; i < wrongIndices.length; ++i) {
-            wrongIndices[i] = accountCase.accountSignatureIndices[0];
-        }
-        ctx.frames[1].data = _paymasterTestCall(wrongIndices);
+        ctx.frames[1].data = _paymasterTestCall(accountCase.accountSignatureIndex);
         ctx.frames[0].status = 1;
         ctx.frameIndex = 1;
         ctx.approvableScopes = SCOPE_PAYMENT;
