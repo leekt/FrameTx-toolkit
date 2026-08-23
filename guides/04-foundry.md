@@ -12,27 +12,24 @@ add the protocol behavior and patches Foundry to use that fork.
 ## Status
 
 This table describes behavior exercised in the reproducible current-spec stack recorded in
-[VERSIONS.md](../VERSIONS.md). All four submodules use the pushed branch
-`feat/eip8141-current-spec`: [Solidity](../solidity/) commit
-`cc3e100a84ab68aca75a2b48e576cfbcc7237caf` on upstream
-`f985208342dc9d695a9097caf8206b11024df979`; [revm](../revm/) commit
-`cad0e9fc012f790719791ff274b76eb852689559` on upstream
-`17a323dac0f893aef6a29d48692185495b366149`; [foundry-core](../foundry-core/) commit
-`f415f6fef0a62f44c7faa83daa8e37b14f0e009b` on upstream
-`78e5b57f86986eabd969a5fdf238b8159f7086fd`; and [Foundry](../foundry/) commit
-`ffe76454940945b3b8ae6c7a6a0ae2939b4ff126` on upstream
-`8bb78aeceda2eca7837d385e4f5bd39d6fc8bc71`. The root gitlinks pin these exact commits, so a
-fresh recursive clone reproduces the stack.
+[VERSIONS.md](../VERSIONS.md). The four toolchain forks publish it on their default branches:
+[Solidity](../solidity/) `develop` at `4c6c547d9a35b23807f421692ac65c35f26f3d54`,
+[revm](../revm/) `main` at `3c82639a34a104af73d9aea0e9b50b005caace81`,
+[foundry-core](../foundry-core/) `main` at
+`f415f6fef0a62f44c7faa83daa8e37b14f0e009b`, and [Foundry](../foundry/) `master` at
+`6cfbfd4e76cb275e1974caebfbf3b88d13c70c37`. The root gitlinks pin those exact commits and
+official Kernel v3.3 at `cd697c7e21715d015e0643af22310a99aa17433b`, so a fresh recursive
+clone reproduces the toolchain and migration fixture.
 
 | Capability | State |
 |---|---|
 | revm executes the seven opcodes | **Done** — covered by interpreter and account tests |
 | revm/compiler execute provisional B6-B9 | **Done** — synthetic `setFrameTx` contexts only |
-| `forge` built against the patched revm | **Done** — Foundry `ffe76454940945b3b8ae6c7a6a0ae2939b4ff126` resolves every revm crate to refreshed head `cad0e9fc012f790719791ff274b76eb852689559` |
+| `forge` built against the patched revm | **Done** — Foundry `6cfbfd4e76cb275e1974caebfbf3b88d13c70c37` resolves every revm crate to primary head `3c82639a34a104af73d9aea0e9b50b005caace81` |
 | `forge build` compiling `@future` sources natively | **Done** — refreshed foundry-core `f415f6fef0a62f44c7faa83daa8e37b14f0e009b` adds `EvmVersion::Future`; `evm_version = "@future"` plus `experimental = true` drive the patched solc over standard JSON |
 | Current-spec Foundry promotion | **Done** — 30/30 primitives, 44/44 Anvil unit, and 31/31 Anvil integration tests pass |
 | `setFrameTx` / `clearFrameTx` cheatcodes | **Done** |
-| `forge test` executing frame accounts | **Done** — full `contracts/` suite passes under the current-spec debug Forge |
+| `forge test` executing frame accounts | **Done** — 324/324 tests across 19 suites, including real Kernel v3.3 and EIP-7702 migration fixtures, all account roles, both rollback paths, and all four paymasters |
 | anvil accepting baseline type `0x06` transactions | **Done** — explicit opt-in; decode, validate, and execute through the integration suite |
 | Toolkit-local native ML-DSA-44 | **Done, experimental** — scheme `0x03`, exact canonical wire, native cryptographic unit tests, production-account raw Anvil execution, and contract policy suites; upstream reserves the value |
 | Atomic batches and default code in anvil | **Done** — terminator rollback, mid-batch skip, signature-index selection all pinned |
@@ -61,8 +58,8 @@ cargo build --locked --bin forge --bin anvil
 
 Foundry's twelve manifest patches and lockfile resolve to the current REVM commit pinned by
 the root repository's `revm` gitlink. Foundry commit
-`ffe76454940945b3b8ae6c7a6a0ae2939b4ff126` resolves them to revm
-`cad0e9fc012f790719791ff274b76eb852689559` and foundry-core
+`6cfbfd4e76cb275e1974caebfbf3b88d13c70c37` resolves them to revm
+`3c82639a34a104af73d9aea0e9b50b005caace81` and foundry-core
 `f415f6fef0a62f44c7faa83daa8e37b14f0e009b`. Both dependency revisions are pushed and the
 locked graph resolves from a clean recursive clone.
 The refreshed Foundry commit also pins RustCrypto `ml-dsa` exactly at `0.1.1`; do not relax

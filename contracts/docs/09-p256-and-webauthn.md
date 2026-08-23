@@ -283,7 +283,7 @@ scope behavior, invalid selections, and ordinary ETH funding.
 [`PaymasterTestSuite.sol`](../test/PaymasterTestSuite.sol) is inherited by all four example
 paymaster tests: `SponsoringPaymasterTest`, `P256PaymasterTest`,
 `WebAuthnPaymasterTest`, and `MLDSAPaymasterTest`. Each paymaster must sponsor the same
-eight-account matrix from a
+ten-account matrix from a
 shared signature envelope:
 
 1. `OwnerAccount`
@@ -294,6 +294,8 @@ shared signature envelope:
 6. `P256Account`
 7. `WebAuthnAccount`
 8. `MLDSAAccount`
+9. Migrated Kernel v3.3 proxy
+10. EIP-7702-delegated EOA
 
 The matrix appends the paymaster's single authorization entry after the account-specific
 prefix, computes its shifted scalar index dynamically, and includes a wrong-selected-index

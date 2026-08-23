@@ -27,16 +27,14 @@ EIP-8250/8272/7906-inspired fixture fields on the wire, public-mempool policy, o
 | Missing | Networking | No frame-transaction gossip or blob-sidecar wrapper is implemented. |
 
 [VERSIONS.md](../VERSIONS.md#reproducibility-status) and the root gitlinks record this
-reproducible current-spec stack. All four submodules use the pushed branch
-`feat/eip8141-current-spec`: Solidity `cc3e100a84ab68aca75a2b48e576cfbcc7237caf`, revm
-`cad0e9fc012f790719791ff274b76eb852689559`, foundry-core
-`f415f6fef0a62f44c7faa83daa8e37b14f0e009b`, and Foundry
-`ffe76454940945b3b8ae6c7a6a0ae2939b4ff126`. Their respective upstream bases are
-`f985208342dc9d695a9097caf8206b11024df979`, `17a323dac0f893aef6a29d48692185495b366149`,
-`78e5b57f86986eabd969a5fdf238b8159f7086fd`, and
-`8bb78aeceda2eca7837d385e4f5bd39d6fc8bc71`. Foundry promotion passed 30/30 primitives,
+reproducible current-spec stack. The four toolchain forks publish it on their default
+branches: Solidity `develop` at `4c6c547d9a35b23807f421692ac65c35f26f3d54`, revm `main`
+at `3c82639a34a104af73d9aea0e9b50b005caace81`, foundry-core `main` at
+`f415f6fef0a62f44c7faa83daa8e37b14f0e009b`, and Foundry `master` at
+`6cfbfd4e76cb275e1974caebfbf3b88d13c70c37`. The official Kernel v3.3 fixture is pinned at
+`cd697c7e21715d015e0643af22310a99aa17433b`. Foundry promotion passed 30/30 primitives,
 44/44 Anvil unit, and 31/31 Anvil integration tests. A fresh recursive clone checks out these
-exact revisions.
+exact revisions and the Kernel fixture's nested dependencies.
 
 ## Activation and execution profiles
 

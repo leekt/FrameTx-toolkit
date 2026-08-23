@@ -1,29 +1,30 @@
 # Building the toolkit
 
-The stack has four source components: patched **solc**, patched **revm**, patched
-**foundry-core**, and **Foundry** built against the latter two. solc produces the account
-artifacts; foundry-core exposes the experimental compiler target; the patched Forge executes
-the artifacts. Artifact generation must happen before `forge test`.
+The repository pins four toolchain forks—patched **solc**, patched **revm**, patched
+**foundry-core**, and **Foundry** built against the latter two—plus official **ZeroDev Kernel
+v3.3** as a fixture submodule with nested dependencies for the real ERC-4337 migration tests.
+Kernel is not a separate build product: solc produces the account artifacts, foundry-core
+exposes the experimental compiler target, and patched Forge executes the artifacts. Artifact
+generation must happen before `forge test`.
 
 ## Reproducibility
 
 The root gitlinks, Foundry's twelve REVM manifest patches, and `Cargo.lock` record the exact
 current stack in [VERSIONS.md](../VERSIONS.md). A fresh recursive clone reproduces it:
 
-- Solidity `cc3e100a84ab68aca75a2b48e576cfbcc7237caf` is rebased onto upstream
-  `f985208342dc9d695a9097caf8206b11024df979`.
-- revm `cad0e9fc012f790719791ff274b76eb852689559` is rebased onto upstream
-  `17a323dac0f893aef6a29d48692185495b366149`.
-- foundry-core `f415f6fef0a62f44c7faa83daa8e37b14f0e009b` is rebased onto upstream
-  `78e5b57f86986eabd969a5fdf238b8159f7086fd`.
-- Foundry `ffe76454940945b3b8ae6c7a6a0ae2939b4ff126` is rebased onto upstream
-  `8bb78aeceda2eca7837d385e4f5bd39d6fc8bc71`.
+- Solidity `develop` is pinned at `4c6c547d9a35b23807f421692ac65c35f26f3d54`.
+- revm `main` is pinned at `3c82639a34a104af73d9aea0e9b50b005caace81`.
+- foundry-core `main` is pinned at `f415f6fef0a62f44c7faa83daa8e37b14f0e009b`.
+- Foundry `master` is pinned at `6cfbfd4e76cb275e1974caebfbf3b88d13c70c37`.
+- The official Kernel v3.3 fixture is pinned at
+  `cd697c7e21715d015e0643af22310a99aa17433b`.
 
-All four submodules use the pushed `feat/eip8141-current-spec` branch. Foundry promotion
-passed 30/30 primitives, 44/44 Anvil unit, and 31/31 Anvil integration tests. The root
-gitlinks pin these commits; `git submodule update --init --recursive` checks out the
-recorded stack. For update discovery, the repository's sync command fetches
-remote refs without automatically replacing the recorded checkouts.
+The four toolchain forks publish EIP-8141 on their default branches. Foundry promotion passed
+30/30 primitives, 44/44 Anvil unit, and 31/31 Anvil integration tests. The root gitlinks pin
+those commits and the Kernel fixture; `git submodule update --init --recursive` checks out all
+five top-level submodules and Kernel's nested dependencies. For update discovery, the
+repository's sync command fetches remote refs without automatically replacing the recorded
+checkouts.
 
 Follow the build order below from a fresh clone.
 
@@ -92,8 +93,8 @@ older submodule state.
 
 Foundry's manifest and lockfile pin all twelve REVM crates and the foundry-core compilers
 fork (which adds the `@future` EVM version) to the current revisions. Foundry commit
-`ffe76454940945b3b8ae6c7a6a0ae2939b4ff126` targets revm
-`cad0e9fc012f790719791ff274b76eb852689559` and foundry-core
+`6cfbfd4e76cb275e1974caebfbf3b88d13c70c37` targets revm
+`3c82639a34a104af73d9aea0e9b50b005caace81` and foundry-core
 `f415f6fef0a62f44c7faa83daa8e37b14f0e009b`; all three commits are pushed and resolve from a
 clean recursive clone:
 
@@ -118,6 +119,11 @@ cd ../contracts
 # Or use the release binary:
 ../foundry/target/release/forge test --allow-local-compiler
 ```
+
+The current project result is 324 passed, 0 failed, and 0 skipped across 19 suites. That
+includes the Kernel v3.3 factory/proxy migration, the same-address EIP-7702 migration, all
+three Frame account roles, both rollback paths, and sponsorship by all four example
+paymasters.
 
 Current Foundry requires `--allow-local-compiler` for an executable configured by path.
 Use it only after building `solidity/build/solc/solc` from the pinned Solidity submodule.

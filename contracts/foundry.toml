@@ -8,6 +8,11 @@ src = "src"
 test = "test"
 out = "out"
 libs = ["lib"]
+remappings = [
+    "kernel-v3.3/=vendor/kernel-v3.3/src/",
+    "solady/=vendor/kernel-v3.3/lib/solady/src/",
+    "ExcessivelySafeCall/=vendor/kernel-v3.3/lib/ExcessivelySafeCall/src/",
+]
 solc = "../solidity/build/solc/solc"
 evm_version = "@future"
 # `@future` is experimental; solc requires the experimental setting with it.

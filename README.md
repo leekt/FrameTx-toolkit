@@ -8,18 +8,16 @@ EIP-8141 is a **draft**. The upstream spec base and each current submodule gitli
 recorded at exact commits in [VERSIONS.md](VERSIONS.md).
 
 > [!note] Reproducible current stack
-> All four submodules use the advertised branch `feat/eip8141-current-spec`: Solidity
-> `cc3e100a84ab68aca75a2b48e576cfbcc7237caf` on upstream
-> `f985208342dc9d695a9097caf8206b11024df979`; revm
-> `cad0e9fc012f790719791ff274b76eb852689559` on upstream
-> `17a323dac0f893aef6a29d48692185495b366149`; foundry-core
-> `f415f6fef0a62f44c7faa83daa8e37b14f0e009b` on upstream
-> `78e5b57f86986eabd969a5fdf238b8159f7086fd`; and Foundry
-> `ffe76454940945b3b8ae6c7a6a0ae2939b4ff126` on upstream
-> `8bb78aeceda2eca7837d385e4f5bd39d6fc8bc71`. Foundry promotion passed 30/30 primitives,
-> 44/44 Anvil unit, and 31/31 Anvil integration tests. The root gitlinks pin these exact
-> pushed commits, so a fresh recursive clone reproduces this stack. To inspect later upstream
-> or feature-branch movement without changing those pins, use
+> The EIP-8141 stack is published on each fork's default branch: Solidity `develop` at
+> `4c6c547d9a35b23807f421692ac65c35f26f3d54`, revm `main` at
+> `3c82639a34a104af73d9aea0e9b50b005caace81`, foundry-core `main` at
+> `f415f6fef0a62f44c7faa83daa8e37b14f0e009b`, and Foundry `master` at
+> `6cfbfd4e76cb275e1974caebfbf3b88d13c70c37`. The real Kernel v3.3 migration fixture uses
+> official ZeroDev Kernel commit `cd697c7e21715d015e0643af22310a99aa17433b`. Foundry
+> promotion passed 30/30 primitives, 44/44 Anvil unit, and 31/31 Anvil integration tests;
+> the contract project passes 324/324 tests across 19 suites. The root gitlinks pin these
+> exact published commits, so a fresh recursive clone reproduces the stack. To inspect later
+> primary-branch movement without changing those pins, use
 > [the fetch-only submodule sync command](.claude/commands/sync-submodules.md).
 
 ## Getting started
@@ -190,6 +188,7 @@ account code or delegation.
 | [`revm/`](revm/) | Submodule — executes the EIP-8141 opcode surface plus host-supplied fixture context |
 | [`foundry-core/`](foundry-core/) | Submodule — teaches Foundry's compiler layer the experimental `@future` EVM target |
 | [`foundry/`](foundry/) | Submodule — `forge` with the frame cheatcodes and opt-in Anvil transaction path |
+| [`contracts/vendor/kernel-v3.3/`](contracts/vendor/kernel-v3.3/) | Official ZeroDev Kernel v3.3 fixture submodule, pinned for real factory/proxy/ERC-4337 migration tests |
 | [`spec/EIP8141.md`](spec/EIP8141.md) | Current-master normative overlay, the local non-normative ML-DSA-44 scheme, and a non-normative tooling-fixture appendix |
 | [`contracts/`](contracts/) | The Foundry project: accounts in `src/accounts`, policy in `src/policy`, EIP helper libraries in `src/eips`, **all tests** in `test/` |
 | [`guides/`](guides/) | Build, write, and what does not work yet |
@@ -265,12 +264,12 @@ To add an account:
 Paymaster implementations have the parallel
 [`contracts/test/PaymasterTestSuite.sol`](contracts/test/PaymasterTestSuite.sol). Its
 four hooks provide the deployed paymaster, one trusted signature, scalar index-selecting
-calldata, and accepted max cost; inherited cases require sponsorship of all eight account targets:
+calldata, and accepted max cost; inherited cases require sponsorship of all ten account targets:
 `OwnerAccount`, `MultisigAccount`, `SessionKeyAccount` through its owner, the portable and
-builtin Yul accounts, `P256Account`, `WebAuthnAccount`, and `MLDSAAccount`. Every case uses
-one shared, shifted signature envelope. Sender-specific signature policies can override
-`_preparePaymasterForAccount(address)`; a paymaster without signature authorization needs a
-policy-specific suite.
+builtin Yul accounts, `P256Account`, `WebAuthnAccount`, `MLDSAAccount`, the migrated Kernel
+v3.3 proxy, and the EIP-7702-delegated EOA. Every case uses one shared, shifted signature
+envelope. Sender-specific signature policies can override `_preparePaymasterForAccount(address)`;
+a paymaster without signature authorization needs a policy-specific suite.
 
 ### Full Anvil transactions
 
@@ -312,7 +311,7 @@ features.
 
 ## Guides
 
-1. **[Building](guides/01-build.md)** — the four-submodule build order and artifact generation.
+1. **[Building](guides/01-build.md)** — the four-component toolchain build order and artifact generation.
 2. **[Writing accounts](guides/02-writing-accounts.md)** — the opcodes, the parameter
    tables, the `APPROVE` scope rules, and the constraints that will bite you.
 3. **[Limitations](guides/03-limitations.md)** — what is not implemented and where this
@@ -336,6 +335,8 @@ All under [`contracts/src/accounts`](contracts/src/accounts), each with notes in
 | `P256Account.sol` | Account | Native protocol-verified P256 metadata, `keccak256(qx || qy)[12:]` signer identity, and self-call key rotation |
 | `WebAuthnAccount.sol` | Account | A strict WebAuthn assertion carried as an `ARBITRARY` witness and verified at precompile `0x100` |
 | `MLDSAAccount.sol` | Account | Exact toolkit-local native ML-DSA-44 scheme `0x03`, domain-separated signer identity, and self-call key rotation |
+| [`KernelV33FrameAccount.sol`](contracts/src/accounts/KernelV33FrameAccount.sol) | Migration adapter | A 1,014-byte, storage-free compatibility shim for an unhooked Kernel v3.3 ECDSA root; it adds Frame validation and delegates the complete legacy surface to the exact prior implementation |
+| [`EOA7702FrameAccount.sol`](contracts/src/accounts/EOA7702FrameAccount.sol) | Migration adapter | Same-address EIP-7702 delegation with secp256k1-only Frame approval and a self-only legacy execution path |
 | `SponsoringPaymaster.sol` | Paymaster | Third-party sponsorship authorized by a protocol-verified secp256k1 signer |
 | `P256Paymaster.sol` | Paymaster | Third-party sponsorship authorized by a protocol-verified native P256 signer |
 | `WebAuthnPaymaster.sol` | Paymaster | Third-party sponsorship authorized by a strict WebAuthn assertion |
@@ -346,6 +347,8 @@ documents the two P256 paths, their APIs, exact WebAuthn witness profile, public
 status, and test boundaries. [`contracts/docs/10-pq.md`](contracts/docs/10-pq.md) documents
 the non-normative ML-DSA wire, gas, contracts, generic native-policy support, key lifecycle,
 and audit boundary. `contracts/docs/01-eoa-default-code.md` covers the no-contract EOA path.
+The production adapters and real factory/delegation tests are indexed in
+[the migration guide](guides/05-migration.md#executable-migration-examples).
 
 ## Two things that will trip you up
 
@@ -390,8 +393,9 @@ straight to what a given change affects.
 Proof of concept. Compiler support, synthetic Forge execution, and the opt-in Anvil raw-RPC
 path exist in the current pinned toolkit stack, including nested receipts, parity traces,
 canonical raw-byte fork replay, and expiry-verifier activation. The
-`feat/eip8141-current-spec` heads for Solidity, revm, foundry-core, and Foundry are pushed and
-reproducible from a fresh recursive clone. Keyed-nonce/recent-root/POST_TX
+default branches (`develop`, `main`, `main`, and `master`, respectively) for Solidity, revm,
+foundry-core, and Foundry contain the pinned stack and reproduce from a fresh recursive clone.
+Keyed-nonce/recent-root/POST_TX
 wire and state integration, public-pool policy, gossip, and Amsterdam state-gas compatibility
 are not implemented. Toolkit-local ML-DSA-44 uses an upstream-reserved scheme value and is
 experimental and unaudited. Experimental EIP-7819, EIP-7851, and EIP-8151 compiler/VM and opt-in

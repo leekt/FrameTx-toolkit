@@ -354,11 +354,11 @@ Paymasters have the parallel
 [`contracts/test/PaymasterTestSuite.sol`](../contracts/test/PaymasterTestSuite.sol). A
 concrete paymaster test supplies `_paymasterUnderTest()`, `_paymasterTestSignature()`,
 `_paymasterTestCall(uint256)`, and `_paymasterTestMaxCost()`. The inherited matrix uses one
-shared, shifted signature envelope to require sponsorship of all eight targets:
+shared, shifted signature envelope to require sponsorship of all ten targets:
 `OwnerAccount`, `MultisigAccount`, `SessionKeyAccount` through its owner, the portable and
-builtin Yul accounts, `P256Account`, `WebAuthnAccount`, and `MLDSAAccount`, plus refusal of
-a misrouted paymaster index. The secp256k1, P256, WebAuthn, and ML-DSA paymaster tests all
-inherit this matrix.
+builtin Yul accounts, `P256Account`, `WebAuthnAccount`, `MLDSAAccount`, the migrated Kernel
+v3.3 proxy, and the EIP-7702-delegated EOA, plus refusal of a misrouted paymaster index. The
+secp256k1, P256, WebAuthn, and ML-DSA paymaster tests all inherit this matrix.
 
 Sender-specific signature policies can override `_preparePaymasterForAccount(address)`.
 A proof-only or allowlist-only paymaster needs a policy-specific suite because this shared

@@ -4,6 +4,12 @@ pragma solidity ^0.8.24;
 import {FrameTest, IFrameVm} from "./FrameTest.sol";
 import {Base64Url} from "../src/crypto/Base64Url.sol";
 
+import {Kernel} from "kernel-v3.3/Kernel.sol";
+import {KernelFactory} from "kernel-v3.3/factory/KernelFactory.sol";
+import {IHook, IValidator} from "kernel-v3.3/interfaces/IERC7579Modules.sol";
+import {ValidationId} from "kernel-v3.3/types/Types.sol";
+import {ValidatorLib} from "kernel-v3.3/utils/ValidationTypeLib.sol";
+
 /// Reusable conformance tests for a paymaster.
 ///
 /// A concrete paymaster test supplies its deployed target, the signature entry
@@ -27,6 +33,7 @@ abstract contract PaymasterTestSuite is FrameTest {
     address private constant DEFAULT_PORTABLE_YUL_ACCOUNT = address(0xA110);
     address private constant DEFAULT_BUILTIN_YUL_ACCOUNT = address(0xA111);
     address private constant DEFAULT_SENDER_TARGET = address(0x7043);
+    address private constant KERNEL_V33_ENTRY_POINT = address(0x4337);
     bytes32 private constant PAYMASTER_SUITE_SIG_HASH = bytes32(uint256(0xf00d));
 
     // P256 generator point (the public key for private scalar 1). P256Account's
@@ -42,6 +49,7 @@ abstract contract PaymasterTestSuite is FrameTest {
         0x123456789abcdef123456789abcdef123456789abcdef123456789abcdef1234;
     uint256 private constant WEBAUTHN_OTHER_CREDENTIAL_KEY =
         0x23456789abcdef123456789abcdef123456789abcdef123456789abcdef12345;
+    uint256 private constant EOA_7702_AUTHORITY_KEY = 0x7702f00d;
     uint256 private constant P256_N =
         0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551;
     string private constant WEBAUTHN_RP_ID = "wallet.example";
@@ -405,6 +413,52 @@ abstract contract PaymasterTestSuite is FrameTest {
         });
     }
 
+    function _kernelV33AccountCase() private returns (SponsoredAccountCase memory accountCase) {
+        address rootValidator = deployAccountWithArgs("ECDSAValidator", bytes(""));
+        address legacyImplementation =
+            deployAccountWithArgs("Kernel", abi.encode(KERNEL_V33_ENTRY_POINT));
+        address frameImplementation = deployAccountWithArgs(
+            "KernelV33FrameAccount", abi.encode(legacyImplementation, rootValidator)
+        );
+        address factory = deployAccountWithArgs("KernelFactory", abi.encode(legacyImplementation));
+
+        ValidationId root = ValidatorLib.validatorToIdentifier(IValidator(rootValidator));
+        bytes[] memory initConfig = new bytes[](0);
+        bytes memory initialization = abi.encodeCall(
+            Kernel.initialize,
+            (root, IHook(address(0)), abi.encodePacked(_suiteOwnerA()), bytes(""), initConfig)
+        );
+        address account = KernelFactory(factory)
+            .createAccount(
+                initialization, keccak256(abi.encode("paymaster-suite-kernel-v3.3", address(this)))
+            );
+
+        vm.prank(KERNEL_V33_ENTRY_POINT);
+        Kernel(payable(account)).upgradeTo(frameImplementation);
+        return _defaultAccountCase(account, _singleAccountCall(1));
+    }
+
+    function _eoa7702AccountCase() private returns (SponsoredAccountCase memory accountCase) {
+        uint256 authorityKey = EOA_7702_AUTHORITY_KEY;
+        address authority = vm.addr(authorityKey);
+        address paymasterSigner = _paymasterTestSignature().signer;
+        while (authority == paymasterSigner) authority = vm.addr(++authorityKey);
+
+        address implementation = deployAccountWithArgs("EOA7702FrameAccount", bytes(""));
+        vm.signAndAttachDelegation(implementation, authorityKey);
+
+        IFrameVm.FrameTxSignature[] memory prefix = new IFrameVm.FrameTxSignature[](3);
+        prefix[0] = secpSig(_differentFromPaymasterAnd(authority, 0xD7702));
+        prefix[1] = secpSig(authority);
+        prefix[2] = secpSig(_differentFromPaymasterAnd(authority, 0xE7702));
+        accountCase = SponsoredAccountCase({
+            account: authority,
+            signaturePrefix: prefix,
+            accountCallData: _singleAccountCall(1),
+            accountSignatureIndex: 1
+        });
+    }
+
     function _installYulAccount(address account, bytes memory runtime) private {
         vm.etch(account, runtime);
         vm.store(account, bytes32(0), bytes32(uint256(uint160(_suiteOwnerA()))));
@@ -493,6 +547,26 @@ abstract contract PaymasterTestSuite is FrameTest {
             _sponsoredContext(accountCase),
             "ML-DSA-44 account must approve execution from native scheme-3 index 1",
             "paymaster must sponsor the ML-DSA-44 account from shifted index 2"
+        );
+    }
+
+    function test_paymasterConformance_sponsorsMigratedKernelV33Account() public {
+        SponsoredAccountCase memory accountCase = _kernelV33AccountCase();
+        _preparePaymasterForAccount(accountCase.account);
+        _assertAccountThenPaymasterApprove(
+            _sponsoredContext(accountCase),
+            "migrated Kernel v3.3 account must approve execution from shifted index 1",
+            "paymaster must sponsor the migrated Kernel account from shifted index 3"
+        );
+    }
+
+    function test_paymasterConformance_sponsorsEoa7702DelegatedAccount() public {
+        SponsoredAccountCase memory accountCase = _eoa7702AccountCase();
+        _preparePaymasterForAccount(accountCase.account);
+        _assertAccountThenPaymasterApprove(
+            _sponsoredContext(accountCase),
+            "EIP-7702 authority must approve execution from shifted index 1",
+            "paymaster must sponsor the delegated EOA from shifted index 3"
         );
     }
 

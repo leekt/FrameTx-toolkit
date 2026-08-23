@@ -213,14 +213,15 @@ pretending to supply an empty index set. The optional preparation hook defaults 
 
 The suite builds one shared, shifted signature envelope and requires the paymaster to sponsor
 `OwnerAccount`, `MultisigAccount`, `SessionKeyAccount` through its owner path, the portable
-Yul account, the builtin Yul account, `P256Account`, `WebAuthnAccount`, and `MLDSAAccount`.
-It also proves that routing the paymaster to an account's selected entry is refused. Each fixture invokes
+Yul account, the builtin Yul account, `P256Account`, `WebAuthnAccount`, `MLDSAAccount`, the
+migrated Kernel v3.3 proxy, and the EIP-7702-delegated EOA. It also proves that routing the
+paymaster to an account's selected entry is refused. Each fixture invokes
 the account's `EXECUTION` path and then the paymaster's
 `PAYMENT` path with independently installed synthetic context; `sender_approved` does not
 persist between those calls.
 
 `SponsoringPaymasterTest`, `P256PaymasterTest`, `WebAuthnPaymasterTest`, and
-`MLDSAPaymasterTest` all inherit this eight-account matrix. ML-DSA entries in the Solidity
+`MLDSAPaymasterTest` all inherit this ten-account matrix. ML-DSA entries in the Solidity
 suite are already-verified metadata fixtures; the native Rust transaction tests, not this
 contract suite, exercise the 3,732-byte cryptographic wire.
 

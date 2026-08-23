@@ -95,8 +95,8 @@ the stock-tooling boundary just happens to fall in the same place.
 
 ## Account and paymaster examples
 
-The reusable paymaster matrix treats the two Yul spellings as distinct targets, giving eight
-account implementations in total.
+The reusable paymaster matrix treats the two Yul spellings as distinct targets and now also
+includes the two migration adapters, giving ten account targets in total.
 
 | Account | Authorization path | Mutable validation policy? |
 |---|---|---|
@@ -108,6 +108,8 @@ account implementations in total.
 | `P256Account` | Selected protocol-verified native P256 signer | Rotatable signer in storage |
 | `WebAuthnAccount` | One selected, contract-verified `ARBITRARY` assertion | Immutable credential configuration |
 | `MLDSAAccount` | Selected toolkit-local native ML-DSA-44 signer | Rotatable signer in storage |
+| [`KernelV33FrameAccount`](src/accounts/KernelV33FrameAccount.sol) | Existing, unhooked Kernel v3.3 ECDSA root after a same-address proxy upgrade | Existing Kernel/validator storage; the 1,014-byte compatibility shim adds no storage, rejects hooked roots, and delegates the complete legacy surface to the exact prior implementation |
+| [`EOA7702FrameAccount`](src/accounts/EOA7702FrameAccount.sol) | Existing EOA secp256k1 identity through EIP-7702 delegation | No adapter storage; EOA remains the authority |
 
 | Paymaster | Authorization path | Public-pool classification |
 |---|---|---|
@@ -122,6 +124,8 @@ security boundaries are documented in
 The exact 3,732-byte ML-DSA wire, domain-separated signer, provisional gas, contracts,
 key lifecycle, default-code boundary, and audit warning are in
 [`docs/10-pq.md`](docs/10-pq.md).
+The production migration adapters, official Kernel pin, legacy execution coverage, and
+rollback boundaries are documented in [`../guides/05-migration.md`](../guides/05-migration.md#executable-migration-examples).
 
 ## Reusable conformance suites
 
@@ -153,9 +157,10 @@ max-cost fixture through `_paymasterUnderTest()`, `_paymasterTestSignature()`,
 `_paymasterTestCall(uint256)`, and `_paymasterTestMaxCost()`. Its shared, shifted signature
 envelope tests that the paymaster sponsors `OwnerAccount`, `MultisigAccount`,
 `SessionKeyAccount` through its owner, both minimal Yul runtimes, `P256Account`, and
-`WebAuthnAccount`, and `MLDSAAccount`, while refusing a misrouted paymaster index.
+`WebAuthnAccount`, `MLDSAAccount`, the migrated Kernel v3.3 proxy, and the EIP-7702-delegated
+EOA, while refusing a misrouted paymaster index.
 `SponsoringPaymasterTest`, `P256PaymasterTest`, `WebAuthnPaymasterTest`, and
-`MLDSAPaymasterTest` all inherit this eight-account matrix.
+`MLDSAPaymasterTest` all inherit this ten-account matrix.
 Sender-specific signature policies can override `_preparePaymasterForAccount(address)` for
 per-sender setup. A paymaster authorized without a signature entry needs a policy-specific
 suite because this shared suite deliberately proves single-index signature routing.

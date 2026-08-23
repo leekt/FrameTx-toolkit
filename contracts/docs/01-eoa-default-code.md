@@ -171,9 +171,9 @@ state. Its default-code cases pin both self-relay and sponsorship:
 The positive self-relay integration also checks that the sender nonce advances once, the
 payer loses value plus a non-zero fee, the SENDER target receives value and writes storage,
 and the mined transaction is retrievable as type `0x06`. These tests are in pinned Foundry
-commit `ffe76454940945b3b8ae6c7a6a0ae2939b4ff126` on the advertised
-`feat/eip8141-current-spec` branch; its 31/31 Anvil integration tests pass. The root gitlink
-records that commit, so a fresh recursive clone reproduces them. See
+`master` commit `6cfbfd4e76cb275e1974caebfbf3b88d13c70c37`; its 31/31 Anvil integration
+tests pass. The root gitlink records that published default-branch commit, so a fresh
+recursive clone reproduces them. See
 [VERSIONS.md](../../VERSIONS.md#reproducibility-status) for the exact reproducible stack.
 
 ## Why this matters

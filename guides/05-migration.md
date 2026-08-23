@@ -22,6 +22,30 @@ Primary specifications: [ERC-4337](https://eips.ethereum.org/EIPS/eip-4337),
 [EIP-7702](https://eips.ethereum.org/EIPS/eip-7702), and
 [EIP-8141](https://eips.ethereum.org/EIPS/eip-8141).
 
+## Executable migration examples
+
+The repository now contains two production-shaped adapters and tests against real migration
+machinery rather than storage-only mocks:
+
+- [`KernelV33FrameAccount.sol`](../contracts/src/accounts/KernelV33FrameAccount.sol) and
+  [`KernelV33Migration.t.sol`](../contracts/test/KernelV33Migration.t.sol) exercise a deployed
+  Kernel v3.3 proxy through a compact compatibility shim. The fixture imports the actual
+  ZeroDev factory, Kernel implementation, and ECDSA root validator from
+  [`contracts/vendor/kernel-v3.3`](../contracts/vendor/kernel-v3.3), pinned to official commit
+  [`cd697c7e21715d015e0643af22310a99aa17433b`](https://github.com/zerodevapp/kernel/tree/cd697c7e21715d015e0643af22310a99aa17433b).
+- [`EOA7702FrameAccount.sol`](../contracts/src/accounts/EOA7702FrameAccount.sol) and
+  [`EOA7702Migration.t.sol`](../contracts/test/EOA7702Migration.t.sol) exercise same-address
+  installation and clearing with Foundry's EIP-7702 delegation processing.
+
+Both adapters' test fixtures inherit the shared
+[`AccountTestSuite`](../contracts/test/AccountTestSuite.sol), which covers self-validation and
+payment (`BOTH`), validation under external sponsorship (`EXECUTION`), and payment for another
+sender (`PAYMENT`). The shared
+[`PaymasterTestSuite`](../contracts/test/PaymasterTestSuite.sol) also requires all four example
+paymasters to sponsor each migrated account. These are real contract/delegation and opcode
+tests under synthetic `setFrameTx` context; they do not turn the migration fixtures into a
+public-bundler or raw type-`0x06` end-to-end test.
+
 ## Boundaries that do not migrate automatically
 
 ERC-4337 and EIP-8141 solve similar user problems with different state and trust boundaries.
@@ -93,6 +117,43 @@ Preserve the existing 4337 surface while adding a narrow Frame surface.
 A safe dual-mode implementation has two small authenticated entry points converging on shared
 wallet policy. It does not have one permissive function that guesses whether the caller meant
 ERC-4337 or EIP-8141.
+
+### Tested Kernel v3.3 path
+
+The Kernel example applies that design to an actual upgradeable account:
+
+- `KernelFactory` deterministically deploys the ERC-1967 proxy and initializes the real
+  `ECDSAValidator` root. The fixture then mutates Kernel's namespaced nonce state, funds the
+  account, and treats that fully initialized proxy as the already-deployed legacy starting
+  point before any migration action.
+- The configured EntryPoint calls Kernel's own `upgradeTo` to install
+  `KernelV33FrameAccount`. The 1,014-byte shim declares no storage: it handles only
+  `validate(uint256)` and delegates fallback/receive plus every legacy selector to the exact
+  immutable pre-migration Kernel implementation. That preserves `validateUserOp`, ERC-7579
+  modules, ERC-1271, execution, receive hooks, and Kernel's existing `upgradeTo` rollback
+  surface instead of re-emitting the full Kernel runtime. A regression keeps the deployed
+  shim below EIP-170's 24,576-byte limit.
+- Frame validation re-reads Kernel's installed root, requires that exact ECDSA validator and
+  Kernel's explicit no-hook sentinel, accepts only a canonical-message secp256k1 entry from
+  its stored owner, and derives the approval scope from the current frame. A same-address P256
+  identity cannot inherit the old root's authority. A root with an execution hook is refused
+  because Frame SENDER execution cannot safely reproduce Kernel's 4337 hook lifecycle.
+- The tests preserve the predicted address, proxy runtime, ETH balance, validation storage
+  word, root identifier, invalidated nonce floor, validator-owned owner state, and EntryPoint.
+  A correctly signed legacy `PackedUserOperation` remains valid after the upgrade, while a
+  wrong-owner signature remains invalid through the delegated legacy path.
+- Rolling the proxy back to the original Kernel implementation restores legacy-only behavior
+  while retaining the root and validator state. The inherited suite exercises all three
+  Frame roles, and every example paymaster sponsors the migrated proxy.
+
+The legacy check calls the real Kernel `validateUserOp` as the configured EntryPoint with a
+real owner signature. It proves that the account's ERC-4337 validation surface survives; it
+does not simulate a complete EntryPoint handleOps flow, bundler admission, or aggregation.
+The test compiles and deploys the legacy Kernel only to model an account that already exists:
+under this repository's `@future` profile that fixture runtime is 29,741 bytes, and Forge's
+test EVM permits the oversized setup deployment. A production migration starts from an
+already-deployed, chain-valid Kernel; only the new 1,014-byte shim is a deployment artifact of
+this migration, and its EIP-170 limit is enforced in the test.
 
 ## Non-upgradeable ERC-4337 accounts: migrate to a new address
 
@@ -190,6 +251,28 @@ if the delegate accepts P256 or post-quantum signatures for daily execution. Tru
 retirement requires moving to a code account whose address is not governed by that EOA key,
 or a future consensus mechanism for code-controlled delegation. This toolkit's provisional
 EIP-7851 experiment is not an upstream production migration mechanism.
+
+### Tested EIP-7702 path
+
+The EOA fixture delegates the authority to `EOA7702FrameAccount` and proves:
+
+- the EOA address and balance remain unchanged and its exact code is the 23-byte
+  `0xef0100 || implementation` designator;
+- the authority can still call its own delegated `execute` entry point, the downstream call
+  retains the EOA as caller, and a third party cannot use that executor;
+- Frame validation remains secp256k1-only, binds the signer to `address(this)`, and rejects a
+  same-address P256 metadata collision instead of broadening the original EOA root;
+- the inherited account suite covers `BOTH`, `EXECUTION`, and `PAYMENT`, and all four example
+  paymasters sponsor the delegated EOA; and
+- a signed zero-address authorization clears the delegation without moving funds, restoring a
+  plain EOA rollback state.
+
+The test uses `vm.signAndAttachDelegation` twice. Forge tracks the authority's successive
+signed authorization nonces across active delegations, so the clear authorization follows the
+installation authorization. The cheatcode mutates the delegation indicator directly; it does
+**not** submit or execute a raw type-4 outer set-code transaction, and it does not emulate that
+outer transaction's sender nonce increment. Production nonce planning must therefore account
+separately for authorization processing and the outer transaction, as described above.
 
 ## Phased launch and rollback checklist
 

@@ -1,4 +1,4 @@
-# Source pins and working-tree verification
+# Source pins and verification
 
 EIP-8141, EIP-7819, EIP-7851, and EIP-8151 remain draft or pre-inclusion proposals. The root
 repository records exact upstream bases so future changes can be diffed against known inputs,
@@ -10,10 +10,11 @@ alongside the submodule state that implements the current toolkit.
 | **EIP-7819 upstream base** | `d420fc4b289e298682006b2ea09355065cf50f99` | 2026-04-09 | [ethereum/EIPs](https://github.com/ethereum/EIPs) — `EIPS/eip-7819.md` |
 | **EIP-7851 upstream base** | `07f3bb3626d4db1f2ac501734fec5b3d32e185c5` | 2026-05-14 | [ethereum/EIPs](https://github.com/ethereum/EIPs) — `EIPS/eip-7851.md` |
 | **EIP-8151 upstream base** | `bf7a4067f263bf7ce01c1511de48473e281d885d` | 2026-07-27 | [ethereum/EIPs](https://github.com/ethereum/EIPs) — `EIPS/eip-8151.md` |
-| **revm gitlink** | `cad0e9fc012f790719791ff274b76eb852689559` | 2026-08-24 | [leekt/revm](https://github.com/leekt/revm/tree/feat/eip8141-current-spec), rebased onto [bluealloy/revm](https://github.com/bluealloy/revm) `17a323dac0f893aef6a29d48692185495b366149` |
-| **foundry gitlink** | `ffe76454940945b3b8ae6c7a6a0ae2939b4ff126` | 2026-08-24 | [leekt/foundry](https://github.com/leekt/foundry/tree/feat/eip8141-current-spec), ported onto [foundry-rs/foundry](https://github.com/foundry-rs/foundry) `8bb78aeceda2eca7837d385e4f5bd39d6fc8bc71` |
-| **solidity gitlink** | `cc3e100a84ab68aca75a2b48e576cfbcc7237caf` | 2026-08-24 | [leekt/solidity](https://github.com/leekt/solidity/tree/feat/eip8141-current-spec), rebased onto [ethereum/solidity](https://github.com/ethereum/solidity) `f985208342dc9d695a9097caf8206b11024df979` |
-| **foundry-core gitlink** | `f415f6fef0a62f44c7faa83daa8e37b14f0e009b` | 2026-08-24 | [leekt/foundry-core](https://github.com/leekt/foundry-core/tree/feat/eip8141-current-spec), rebased onto [foundry-rs/foundry-core](https://github.com/foundry-rs/foundry-core) `78e5b57f86986eabd969a5fdf238b8159f7086fd` |
+| **Solidity gitlink (`develop`)** | `4c6c547d9a35b23807f421692ac65c35f26f3d54` | 2026-08-24 | [leekt/solidity `develop`](https://github.com/leekt/solidity/tree/develop), with the current EIP-8141 compiler work merged into the fork's default development branch |
+| **revm gitlink (`main`)** | `3c82639a34a104af73d9aea0e9b50b005caace81` | 2026-08-24 | [leekt/revm `main`](https://github.com/leekt/revm/tree/main), with the current EIP-8141 execution work merged into the fork's default branch |
+| **Foundry gitlink (`master`)** | `6cfbfd4e76cb275e1974caebfbf3b88d13c70c37` | 2026-08-24 | [leekt/foundry `master`](https://github.com/leekt/foundry/tree/master), with the current FrameTx/Anvil integration and primary-branch dependency pins |
+| **foundry-core gitlink (`main`)** | `f415f6fef0a62f44c7faa83daa8e37b14f0e009b` | 2026-08-24 | [leekt/foundry-core `main`](https://github.com/leekt/foundry-core/tree/main), including experimental `@future` compiler support |
+| **ZeroDev Kernel v3.3 dependency** | `cd697c7e21715d015e0643af22310a99aa17433b` | 2025-04-03 | [zerodevapp/kernel](https://github.com/zerodevapp/kernel/tree/cd697c7e21715d015e0643af22310a99aa17433b), pinned at `contracts/vendor/kernel-v3.3` for the real factory/proxy/ECDSA-root migration fixture |
 
 [`spec/EIP8141.md`](spec/EIP8141.md) is not an exact vendored snapshot, but its normative
 body matches the upstream base above. That upstream revision includes the standalone
@@ -30,17 +31,19 @@ does not claim transaction-wire support for those extensions.
 
 ## Reproducibility status
 
-The root gitlinks and the four advertised `feat/eip8141-current-spec` branches are aligned at
-the revisions above. A recursive clone of this root revision can fetch the complete stack.
-Foundry patches all twelve REVM crates to
-`cad0e9fc012f790719791ff274b76eb852689559` and resolves its seven foundry-core-derived
+The root gitlinks and the four toolchain forks' published default branches are aligned at the
+revisions above. A recursive clone of this root revision also fetches the pinned Kernel v3.3
+dependency. Foundry patches all twelve REVM crates to
+`3c82639a34a104af73d9aea0e9b50b005caace81` and resolves its seven foundry-core-derived
 packages at `f415f6fef0a62f44c7faa83daa8e37b14f0e009b`; `Cargo.lock` records those exact
 revisions. The root checkout points at those same REVM and foundry-core commits, plus
-Foundry `ffe76454940945b3b8ae6c7a6a0ae2939b4ff126` and Solidity
-`cc3e100a84ab68aca75a2b48e576cfbcc7237caf`.
+Foundry `6cfbfd4e76cb275e1974caebfbf3b88d13c70c37`, Solidity
+`4c6c547d9a35b23807f421692ac65c35f26f3d54`, and Kernel v3.3
+`cd697c7e21715d015e0643af22310a99aa17433b`.
 
-All four rebased feature branches are published without rewriting their older feature
-branches. The fetch-only workflow in
+The EIP-8141 work is published on `develop` for Solidity, `main` for revm and foundry-core,
+and `master` for Foundry; consumers no longer need a feature-branch checkout. The fetch-only
+workflow in
 [`.claude/commands/sync-submodules.md`](.claude/commands/sync-submodules.md) reports upstream
 movement without unexpectedly replacing a developer's checked-out submodule state.
 
@@ -99,7 +102,7 @@ the EIP-7851 opcode assignment below remain explicitly non-normative toolkit cho
 | Divergence | Why |
 |---|---|
 | The `APPROVE` opcode is spelled `approvetx` in Solidity and Yul | `approve` is the ERC-20 method name; reserving it as a compiler builtin would break a large share of existing contracts. The opcode byte `0xaa` is unchanged. |
-| Signature scheme `0x03` is toolkit-local ML-DSA-44 | Upstream reserves the value. The local host requires exact `signature[2420] || publicKey[1312]`, derives `low20(keccak256(0x03 || publicKey))`, verifies pure FIPS 204 with empty context over the selected 32-byte message, and charges a provisional 50,000 gas. The current working tree pins unaudited RustCrypto `ml-dsa = 0.1.1`; see `contracts/docs/10-pq.md`. |
+| Signature scheme `0x03` is toolkit-local ML-DSA-44 | Upstream reserves the value. The local host requires exact `signature[2420] || publicKey[1312]`, derives `low20(keccak256(0x03 || publicKey))`, verifies pure FIPS 204 with empty context over the selected 32-byte message, and charges a provisional 50,000 gas. The pinned Foundry revision uses unaudited RustCrypto `ml-dsa = 0.1.1`; see `contracts/docs/10-pq.md`. |
 | Fee fields are narrower at the Foundry/Alloy boundary | The EIP admits canonical fee scalars below `2**256`, and the Frame wire decoder initially represents them as 256-bit values. The current transaction-trait and REVM fee APIs are `u128`, so validation rejects any fee field above `u128::MAX`. This is an explicit executable-profile limit, not an upstream constraint. |
 | Fixture `TXPARAM` selectors moved from `0x0C`-`0x10` to `0x80`-`0x84` | Upstream assigned `TXPARAM(0x0C)` to `state_gas_left`, colliding with the fixture legacy nonce. The fixture block now sits at `0x80+`, clear of any plausible normative growth; `0x0D`-`0x7F` and `0x85+` halt as undefined. |
 | State gas is metered for EIP-8141's own charge points only | The envelope carries per-frame `limits = [execution, state]`, budgets flow through `TXPARAM(0x0C)`/`FRAMEPARAM(0x09-0x0B)`, receipts report `gas_used = [execution, state]`, settlement and the payer charge include the state dimension, and the two account-creation charges (value-bearing frame, `APPROVE` sender creation) are charged at `STATE_BYTES_PER_NEW_ACCOUNT * CPSB`. Opcode-level EIP-8037 charging (`SSTORE`, code deposit) and cross-frame refill attribution are **pending**: EIP-8037 itself is not implemented in the forks, so those receipts' state dimension reflects only the frame-level charges. |
@@ -115,19 +118,19 @@ the EIP-7851 opcode assignment below remain explicitly non-normative toolkit cho
 | EIP-8151 activation is explicit and Ethereum-only | The proposal has no assigned execution fork. REVM and Foundry use a default-off bit under Prague-or-later rules without inventing a Hegotá `SpecId`; Anvil exposes `--enable-eip8151` only on its canonical Ethereum profile. Solc changes high-level `ecrecover` from `pure` to `view` only at `@future`. |
 | Wire reference vectors are self-pinned | The previous go-ethereum cross-check (`leekt/go-ethereum@fix/eip8141-frame-tx`) implements the pinned envelope and predates the `fees`/`limits` format. `frame.rs` pins vectors generated by this implementation, including a dev-key-signed vector over the new canonical signature hash; regenerate the cross-check once the reference adopts the new wire format. |
 
-The working-tree implementation has been aligned and rechecked against the current pin,
+The pinned implementation has been aligned and rechecked against the current spec revision,
 including uniform calldata-floor tokens, frame-entry target charging, active-precompile
 dispatch before default code, and current validation-prefix restrictions. The verification
 rows below record those reruns; the explicit local divergences in this table remain.
 
-## Working-tree verification
+## Verification
 
 These results record the 2026-08-24 upstream-rebased integration runs. Foundry resolves the
 exact REVM and foundry-core revisions listed above.
 
 | Suite | Result |
 |---|---|
-| `contracts/` — debug `forge test`, native `@future` build (no external artifact script) | 290 passed, 0 failed, 0 skipped across 17 suites; includes eight account targets and four paymaster suites |
+| `contracts/` — debug `forge test`, native `@future` build (no external artifact script) | 324 passed, 0 failed, 0 skipped across 19 suites; includes ten account targets (the original eight plus migrated Kernel v3.3 and an EIP-7702-delegated EOA), four paymaster suites, legacy-4337 preservation, and both rollback paths |
 | `contracts/` — stock forge 1.7.1, `FOUNDRY_PROFILE=policy` | 14 passed, 0 failed |
 | `contracts/` — current native deployed-bytecode artifact lengths | `OwnerAccount` 579 B; `MultisigAccount` 726 B; `SessionKeyAccount` 1,537 B; `SponsoringPaymaster` 878 B; `MLDSAAccount` 918 B; `MLDSAPaymaster` 1,254 B |
 | `foundry-core` — `foundry-compilers-artifacts-solc` | 49 unit and 3 doc tests passed; one doc test intentionally ignored |
