@@ -14,6 +14,3 @@
 	path = foundry-core
 	url = https://github.com/leekt/foundry-core.git
 	branch = main
-[submodule "contracts/vendor/kernel-v3.3"]
-	path = contracts/vendor/kernel-v3.3
-	url = https://github.com/zerodevapp/kernel.git

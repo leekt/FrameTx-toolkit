@@ -1,0 +1,24 @@
+[[dependencies]]
+name = "excessively-safe-call"
+version = "0.0.1"
+git = "https://github.com/nomad-xyz/ExcessivelySafeCall.git"
+rev = "81cd99ce3e69117d665d7601c330ea03b97acce0"
+
+[[dependencies]]
+name = "forge-std"
+version = "1.16.2"
+url = "https://soldeer-revisions.s3.amazonaws.com/forge-std/1_16_2_03-07-2026_07:37:45_forge-std-1.16.zip"
+checksum = "405dccc9d60d753f6abc412b4adf0359f4390f65dbadbbb277a12b4946ed8969"
+integrity = "5fb4325b60d7d4194bd0481e2f94398cf1d9c6561dd12a66fb2748ef4a68205f"
+
+[[dependencies]]
+name = "kernel-v3.3"
+version = "3.3.0"
+git = "https://github.com/zerodevapp/kernel.git"
+rev = "cd697c7e21715d015e0643af22310a99aa17433b"
+
+[[dependencies]]
+name = "solady"
+version = "0.0.278"
+git = "https://github.com/vectorized/solady.git"
+rev = "3f2f5345261904463f5429c9031c3d2185c0f4fe"

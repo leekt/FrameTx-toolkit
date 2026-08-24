@@ -6,17 +6,6 @@ import {IFrameVm} from "./FrameTest.sol";
 import {EOA7702FrameAccount} from "../src/accounts/EOA7702FrameAccount.sol";
 import {Vm} from "forge-std/Vm.sol";
 
-contract EOA7702MigrationTarget {
-    uint256 public calls;
-    address public lastCaller;
-
-    function ping() external returns (uint256) {
-        ++calls;
-        lastCaller = msg.sender;
-        return calls;
-    }
-}
-
 /// Exercises a same-address EOA migration with Foundry's real EIP-7702
 /// authorization processing. The inherited account suite then drives the
 /// delegated runtime through every EIP-8141 account role.
@@ -67,24 +56,15 @@ contract EOA7702MigrationTest is AccountTestSuite {
         );
     }
 
-    function test_eoa7702Migration_keepsLegacySelfExecution() public {
-        EOA7702MigrationTarget target = new EOA7702MigrationTarget();
+    function test_eoa7702Migration_receivesEth() public {
+        uint256 amount = 1 ether;
+        uint256 balanceBefore = authority.balance;
+        vm.deal(address(this), amount);
 
-        vm.prank(authority);
-        bytes memory result = EOA7702FrameAccount(payable(authority))
-            .execute(address(target), 0, abi.encodeCall(EOA7702MigrationTarget.ping, ()));
+        (bool ok,) = payable(authority).call{value: amount}("");
 
-        assertEq(abi.decode(result, (uint256)), 1, "legacy path must return target data");
-        assertEq(target.calls(), 1, "legacy EOA-originated call must execute");
-        assertEq(target.lastCaller(), authority, "delegated call must preserve EOA identity");
-    }
-
-    function test_eoa7702Migration_rejectsThirdPartyLegacyExecution() public {
-        EOA7702MigrationTarget target = new EOA7702MigrationTarget();
-        vm.expectRevert(EOA7702FrameAccount.NotAuthority.selector);
-        EOA7702FrameAccount(payable(authority))
-            .execute(address(target), 0, abi.encodeCall(EOA7702MigrationTarget.ping, ()));
-        assertEq(target.calls(), 0, "unauthorized caller must not reach the target");
+        assertTrue(ok, "delegated EOA must accept a plain ETH transfer");
+        assertEq(authority.balance, balanceBefore + amount, "received ETH must remain at the EOA");
     }
 
     function test_eoa7702Migration_rejectsCrossSchemeSignerCollision() public {

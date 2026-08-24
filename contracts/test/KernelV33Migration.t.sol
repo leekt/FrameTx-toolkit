@@ -20,8 +20,9 @@ import {ValidationData, ValidationId} from "kernel-v3.3/types/Types.sol";
 import {ValidatorLib} from "kernel-v3.3/utils/ValidationTypeLib.sol";
 import {ECDSAValidator} from "kernel-v3.3/validator/ECDSAValidator.sol";
 
-/// A migration test against the actual ZeroDev Kernel v3.3 contracts pinned in
-/// `vendor/kernel-v3.3`. The fixture starts with a deterministic KernelFactory
+/// A migration test against the actual ZeroDev Kernel v3.3 contracts pinned by
+/// Soldeer under the `kernel-v3.3/` import prefix. The fixture starts with a deterministic
+/// KernelFactory
 /// ERC-1967 proxy, initializes its real ECDSA root, mutates real Kernel state,
 /// and then uses Kernel's own EntryPoint-authorized UUPS path to add EIP-8141.
 contract KernelV33MigrationTest is AccountTestSuite {

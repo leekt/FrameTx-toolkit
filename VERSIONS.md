@@ -2,7 +2,7 @@
 
 EIP-8141, EIP-7819, EIP-7851, and EIP-8151 remain draft or pre-inclusion proposals. The root
 repository records exact upstream bases so future changes can be diffed against known inputs,
-alongside the submodule state that implements the current toolkit.
+alongside the toolchain gitlinks and Soldeer package lock that implement the current toolkit.
 
 | Component | Pinned at | Date | Source |
 |---|---|---|---|
@@ -14,7 +14,10 @@ alongside the submodule state that implements the current toolkit.
 | **revm gitlink (`main`)** | `21ace0ade666d99f3e1c6e95ba173972164d0ceb` | 2026-08-24 | [leekt/revm `main`](https://github.com/leekt/revm/tree/main), with the current EIP-8141 execution work merged into the fork's default branch |
 | **Foundry gitlink (`master`)** | `5683db7dc79cace93363fe3465e20792b859bec9` | 2026-08-24 | [leekt/foundry `master`](https://github.com/leekt/foundry/tree/master), with the current FrameTx/Anvil integration and primary-branch dependency pins |
 | **foundry-core gitlink (`main`)** | `f415f6fef0a62f44c7faa83daa8e37b14f0e009b` | 2026-08-24 | [leekt/foundry-core `main`](https://github.com/leekt/foundry-core/tree/main), including experimental `@future` compiler support |
-| **ZeroDev Kernel v3.3 dependency** | `cd697c7e21715d015e0643af22310a99aa17433b` | 2025-04-03 | [zerodevapp/kernel](https://github.com/zerodevapp/kernel/tree/cd697c7e21715d015e0643af22310a99aa17433b), pinned at `contracts/vendor/kernel-v3.3` for the real factory/proxy/ECDSA-root migration fixture |
+| **ZeroDev Kernel v3.3 Soldeer dependency** | `cd697c7e21715d015e0643af22310a99aa17433b` | 2025-04-03 | [zerodevapp/kernel](https://github.com/zerodevapp/kernel/tree/cd697c7e21715d015e0643af22310a99aa17433b), exact git revision in `contracts/soldeer.lock` for the real factory/proxy/ECDSA-root migration fixture |
+| **Solady Soldeer dependency** | `3f2f5345261904463f5429c9031c3d2185c0f4fe` (`0.0.278`) | 2024-12-07 | [Vectorized/solady](https://github.com/Vectorized/solady/tree/3f2f5345261904463f5429c9031c3d2185c0f4fe), preserving the Kernel fixture's exact prior revision and providing the project-wide `solady/` import |
+| **ExcessivelySafeCall Soldeer dependency** | `81cd99ce3e69117d665d7601c330ea03b97acce0` (`0.0.1`) | 2022-07-29 | [nomad-xyz/ExcessivelySafeCall](https://github.com/nomad-xyz/ExcessivelySafeCall/tree/81cd99ce3e69117d665d7601c330ea03b97acce0), exact git revision in `contracts/soldeer.lock` |
+| **forge-std Soldeer dependency** | `1.16.2` | 2026-07-03 | Exact Soldeer registry archive, checksum, and extracted-folder integrity pinned in `contracts/soldeer.lock` |
 
 [`spec/EIP8141.md`](spec/EIP8141.md) is not an exact vendored snapshot, but its normative
 body matches the upstream base above. That upstream revision includes the standalone
@@ -31,14 +34,15 @@ does not claim transaction-wire support for those extensions.
 ## Reproducibility status
 
 The root gitlinks and the four toolchain forks' published default branches are aligned at the
-revisions above. A recursive clone of this root revision also fetches the pinned Kernel v3.3
-dependency. Foundry patches all twelve REVM crates to
+revisions above. Soldeer restores all contract dependencies from `contracts/soldeer.lock`.
+Foundry patches all twelve REVM crates to
 `21ace0ade666d99f3e1c6e95ba173972164d0ceb` and resolves its seven foundry-core-derived
 packages at `f415f6fef0a62f44c7faa83daa8e37b14f0e009b`; `Cargo.lock` records those exact
 revisions. The root checkout points at those same REVM and foundry-core commits, plus
-Foundry `5683db7dc79cace93363fe3465e20792b859bec9`, Solidity
-`4c6c547d9a35b23807f421692ac65c35f26f3d54`, and Kernel v3.3
-`cd697c7e21715d015e0643af22310a99aa17433b`.
+Foundry `5683db7dc79cace93363fe3465e20792b859bec9` and Solidity
+`4c6c547d9a35b23807f421692ac65c35f26f3d54`; the contract lock separately pins Kernel v3.3
+`cd697c7e21715d015e0643af22310a99aa17433b`, Solady, forge-std, and
+ExcessivelySafeCall.
 
 The EIP-8141 work is published on `develop` for Solidity, `main` for revm and foundry-core,
 and `master` for Foundry; consumers no longer need a feature-branch checkout. The fetch-only
@@ -122,7 +126,7 @@ exact REVM and foundry-core revisions listed above.
 
 | Suite | Result |
 |---|---|
-| `contracts/` — debug `forge test`, native `@future` build (no external artifact script) | 260 passed, 0 failed, 0 skipped across 15 suites; includes the account and paymaster matrices, legacy-4337 preservation, and both rollback paths |
+| `contracts/` — debug `forge test`, native `@future` build (no external artifact script) | 259 passed, 0 failed, 0 skipped across 15 suites; includes the account and paymaster matrices, legacy-4337 preservation, and both rollback paths |
 | `contracts/` — stock forge 1.7.1, `FOUNDRY_PROFILE=policy` | 14 passed, 0 failed |
 | `contracts/` — current native deployed-bytecode artifact lengths | `OwnerAccount` 579 B; `MultisigAccount` 726 B; `SessionKeyAccount` 1,537 B; `SponsoringPaymaster` 878 B |
 | `foundry-core` — `foundry-compilers-artifacts-solc` | 49 unit and 3 doc tests passed; one doc test intentionally ignored |

@@ -5,8 +5,11 @@ pragma solidity ^0.8.30;
 /// @dev The index selects one entry from `tx.signatures`. Frame calldata is part
 ///      of the canonical transaction signature hash, so a canonical signature
 ///      commits to this routing information together with the rest of the frame
-///      list. Accounts that aggregate multiple signatures use
-///      `IMultisigFrameAccount` instead.
+///      list. The same entry point can run in a PAYMENT-only VERIFY frame after
+///      the sender approves execution, letting the account sponsor that sender
+///      without granting any execution authority to the sponsor account.
+///      Accounts that aggregate multiple signatures use `IMultisigFrameAccount`
+///      instead.
 interface IFrameAccount {
     function validate(uint256 signatureIndex) external;
 }

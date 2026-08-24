@@ -52,7 +52,7 @@ The account reads the current frame's `allowed_scope` (`flags & 0x3`) instead of
 |---|---|---|---|
 | Validate and pay for itself | this account, also `tx.sender` | `0x3` (`BOTH`) | Grants execution and pays `max_cost` |
 | Validate with a paymaster | this account, also `tx.sender` | `0x2` (`EXECUTION`) | Grants execution; a later paymaster frame pays |
-| Pay for another account | this account, different from `tx.sender` | `0x1` (`PAYMENT`) | Pays after the sender has already granted execution |
+| Sponsor another account (payment only) | this account, different from `tx.sender` | `0x1` (`PAYMENT`) | Pays after the sender has already granted execution |
 
 `APPROVE` enforces that the requested scope is non-zero and is a subset of the frame flags.
 Execution approval additionally requires `resolved_target == tx.sender`; payment approval
@@ -74,7 +74,7 @@ come after the sender's execution validator.
 | 1 | `VERIFY` | `0x1` | paymaster | paymaster-specific | Approve payment after execution is approved |
 | 2… | `SENDER` | operation flags | user-selected target | operation calldata | User operation |
 
-### Paying for another sender
+### Sponsoring another sender (payment only)
 
 | # | Mode | Flags | Target | Data | Purpose |
 |---|---|---|---|---|---|

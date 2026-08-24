@@ -6,6 +6,8 @@ and `forge test` cover the whole project. The Foundry fork maps `@future` to the
 pre-Amsterdam **Osaka** EVM: this keeps the frame profile away from Amsterdam's incompatible
 node-level state-gas rules while activating the [EIP-7951 P256VERIFY
 precompile](https://eips.ethereum.org/EIPS/eip-7951) at `0x100` for WebAuthn verification.
+All Solidity packages are declared in `foundry.toml`, locked by `soldeer.lock`, and restored
+to the ignored `dependencies/` directory with `forge soldeer install`.
 
 ## What runs where
 
@@ -67,7 +69,10 @@ by every canonical transaction signature, so none of this selected-index routing
 changed without invalidating those signatures. Each account also derives `allowed_scope`
 from the current frame: `BOTH` when it validates and pays for itself, `EXECUTION` when an
 external paymaster pays, and `PAYMENT` when it acts as the payer for another already-approved
-sender.
+sender. That last layout is the account's sponsor-only role: it uses the normal account
+validation entry point, grants no execution authority to the sponsor, and requires no
+dedicated paymaster contract. The paymaster examples remain useful specialized alternatives
+with sponsor-specific keys, cost caps, funding, and withdrawal policy.
 
 The generic `OwnerAccount` and `SessionKeyAccount` accept any protocol-validated scheme when
 its resolved identity matches their configured address. `MultisigAccount` explicitly admits
@@ -169,6 +174,7 @@ and proves the secp256k1 multisig-owner/index-1 default-payer reuse layout.
 ## Usage
 
 ```bash
+../foundry/target/release/forge soldeer install
 ../foundry/target/release/forge test --allow-local-compiler       # policy + frame semantics
 ../foundry/target/release/forge test --allow-local-compiler -vvv  # with traces
 ../foundry/target/release/forge fmt           # formats src/ and test/

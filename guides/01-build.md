@@ -1,16 +1,17 @@
 # Building the toolkit
 
 The repository pins four toolchain forks—patched **solc**, patched **revm**, patched
-**foundry-core**, and **Foundry** built against the latter two—plus official **ZeroDev Kernel
-v3.3** as a fixture submodule with nested dependencies for the real ERC-4337 migration tests.
+**foundry-core**, and **Foundry** built against the latter two. The contract project uses
+Soldeer for **ZeroDev Kernel v3.3**, **Solady**, **forge-std**, and
+**ExcessivelySafeCall**, with exact revisions in `contracts/soldeer.lock`.
 Kernel is not a separate build product: solc produces the account artifacts, foundry-core
 exposes the experimental compiler target, and patched Forge executes the artifacts. Artifact
 generation must happen before `forge test`.
 
 ## Reproducibility
 
-The root gitlinks, Foundry's twelve REVM manifest patches, and `Cargo.lock` record the exact
-current stack in [VERSIONS.md](../VERSIONS.md). A fresh recursive clone reproduces it:
+The root gitlinks, Foundry's twelve REVM manifest patches, `Cargo.lock`, and the contract
+project's `soldeer.lock` record the exact current stack in [VERSIONS.md](../VERSIONS.md):
 
 - Solidity `develop` is pinned at `4c6c547d9a35b23807f421692ac65c35f26f3d54`.
 - revm `main` is pinned at `21ace0ade666d99f3e1c6e95ba173972164d0ceb`.
@@ -18,13 +19,17 @@ current stack in [VERSIONS.md](../VERSIONS.md). A fresh recursive clone reproduc
 - Foundry `master` is pinned at `5683db7dc79cace93363fe3465e20792b859bec9`.
 - The official Kernel v3.3 fixture is pinned at
   `cd697c7e21715d015e0643af22310a99aa17433b`.
+- Solady is pinned at `3f2f5345261904463f5429c9031c3d2185c0f4fe`, the exact
+  `0.0.278` revision used by that Kernel fixture.
+- ExcessivelySafeCall is pinned at `81cd99ce3e69117d665d7601c330ea03b97acce0`,
+  and forge-std is locked to registry release `1.16.2`.
 
 The four toolchain forks publish EIP-8141 on their default branches. Foundry promotion passed
 27/27 primitives, 44/44 Anvil unit, and 30/30 Anvil integration tests. The root gitlinks pin
-those commits and the Kernel fixture; `git submodule update --init --recursive` checks out all
-five top-level submodules and Kernel's nested dependencies. For update discovery, the
-repository's sync command fetches remote refs without automatically replacing the recorded
-checkouts.
+those toolchain commits; `git submodule update --init --recursive` checks out the four
+top-level toolchain submodules. Soldeer restores every Solidity dependency separately from
+the contract lockfile. For toolchain update discovery, the repository's sync command fetches
+remote refs without automatically replacing the recorded checkouts.
 
 Follow the build order below from a fresh clone.
 
@@ -115,12 +120,14 @@ and `solc = "../solidity/build/solc/solc"` in its default profile.
 
 ```bash
 cd ../contracts
+../foundry/target/debug/forge soldeer install
 ../foundry/target/debug/forge test --allow-local-compiler
 # Or use the release binary:
+../foundry/target/release/forge soldeer install
 ../foundry/target/release/forge test --allow-local-compiler
 ```
 
-The current project result is 260 passed, 0 failed, and 0 skipped across 15 suites. That
+The current project result is 259 passed, 0 failed, and 0 skipped across 15 suites. That
 includes the Kernel v3.3 factory/proxy migration, the same-address EIP-7702 migration, all
 three Frame account roles, both rollback paths, and sponsorship by all three example
 paymasters.

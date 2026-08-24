@@ -33,8 +33,9 @@ at `21ace0ade666d99f3e1c6e95ba173972164d0ceb`, foundry-core `main` at
 `f415f6fef0a62f44c7faa83daa8e37b14f0e009b`, and Foundry `master` at
 `5683db7dc79cace93363fe3465e20792b859bec9`. The official Kernel v3.3 fixture is pinned at
 `cd697c7e21715d015e0643af22310a99aa17433b`. Foundry promotion passed 27/27 primitives,
-44/44 Anvil unit, and 30/30 Anvil integration tests. A fresh recursive clone checks out these
-exact revisions and the Kernel fixture's nested dependencies.
+44/44 Anvil unit, and 30/30 Anvil integration tests. A fresh recursive clone checks out the
+exact toolchain revisions; `forge soldeer install` restores the locked Kernel fixture and its
+direct Solidity dependencies.
 
 ## Activation and execution profiles
 

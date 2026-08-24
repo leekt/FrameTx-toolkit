@@ -201,7 +201,13 @@ current `allowed_scope`, rejecting zero. The same validation code can then fill 
 |---|---|---|---|
 | Validate and pay for itself | `tx.sender` | `0x3` (`BOTH`) | Grants execution and supplies ETH |
 | Validate with an external paymaster | `tx.sender` | `0x2` (`EXECUTION`) | Grants execution; a later pay frame supplies ETH |
-| Pay for another account | the payer account, not `tx.sender` | `0x1` (`PAYMENT`) | Supplies ETH after the sender has already approved execution |
+| Sponsor another account (payment only) | the sponsor account, not `tx.sender` | `0x1` (`PAYMENT`) | Supplies ETH after the sender has already approved execution |
+
+The last row is the account sponsor-only role. It calls the account's normal validation
+entry point in a PAYMENT-only frame; the account is not `tx.sender` and receives no execution
+authority. A dedicated paymaster contract is optional, not required. Paymasters remain useful
+when sponsorship needs a separate key, cost cap, funding pool, withdrawal policy, or service
+boundary.
 
 The last row is valid EVM behavior and can be directly or privately included. If the payer's
 validation reads its owner, threshold, session keys, or other policy from storage, however,

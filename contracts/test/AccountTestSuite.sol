@@ -9,7 +9,7 @@ import {FrameTest, IFrameVm} from "./FrameTest.sol";
 /// signatures needed to satisfy its policy. The suite then proves that the account
 /// can occupy each account-side approval role in the standard frame prefixes:
 /// self relay (BOTH), sponsored relay (EXECUTION), and paying for another
-/// sender (PAYMENT).
+/// sender as a sponsor only (PAYMENT).
 ///
 /// These fixtures execute the validation bytecode and real frame opcodes with a
 /// non-zero max cost and a funded intended payer. The synthetic frame context
@@ -251,7 +251,7 @@ abstract contract AccountTestSuite is FrameTest {
         ctx.approvableScopes = SCOPE_EXECUTION;
     }
 
-    function paysOtherSenderContext(bytes memory accountCallData)
+    function sponsorOnlyContext(bytes memory accountCallData)
         internal
         view
         returns (IFrameVm.FrameTx memory ctx)
@@ -333,16 +333,16 @@ abstract contract AccountTestSuite is FrameTest {
         assertApprovesFrame(paymaster, ctx, "later paymaster must approve the transaction cost");
     }
 
-    function test_accountSuite_paysForAnotherSender() public {
+    function test_accountSuite_sponsorsAnotherSenderPaymentOnly() public {
         address otherSender = accountSuiteOtherSender();
         deployAccount("OwnerAccount", otherSender);
         vm.store(otherSender, bytes32(0), bytes32(uint256(uint160(otherSender))));
         vm.deal(otherSender, 0);
         vm.deal(accountUnderTest(), SUITE_MAX_COST);
         bytes memory accountCallData = conformanceValidationCalldata();
-        IFrameVm.FrameTx memory ctx = paysOtherSenderContext(accountCallData);
-        assertTrue(ctx.sender != accountUnderTest(), "payment beneficiary must be another sender");
-        assertEq(ctx.frames[1].flags, SCOPE_PAYMENT, "payer frame must permit exactly PAYMENT");
+        IFrameVm.FrameTx memory ctx = sponsorOnlyContext(accountCallData);
+        assertTrue(ctx.sender != accountUnderTest(), "sponsor must not be the transaction sender");
+        assertEq(ctx.frames[1].flags, SCOPE_PAYMENT, "sponsor frame must permit only PAYMENT");
 
         ctx.frameIndex = 0;
         ctx.frames[0].status = 0;
@@ -354,10 +354,10 @@ abstract contract AccountTestSuite is FrameTest {
         ctx.frameIndex = 1;
         ctx.frames[0].status = 1;
         ctx.approvableScopes = SCOPE_NONE;
-        assertRefusesFrame(accountUnderTest(), ctx, "payer role must execute APPROVE(PAYMENT)");
+        assertRefusesFrame(accountUnderTest(), ctx, "sponsor role must execute APPROVE(PAYMENT)");
         ctx.approvableScopes = SCOPE_PAYMENT;
         assertApprovesFrame(
-            accountUnderTest(), ctx, "account must be able to pay for another sender"
+            accountUnderTest(), ctx, "account must sponsor payment without approving execution"
         );
     }
 

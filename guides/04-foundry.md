@@ -18,8 +18,9 @@ This table describes behavior exercised in the reproducible current-spec stack r
 [foundry-core](../foundry-core/) `main` at
 `f415f6fef0a62f44c7faa83daa8e37b14f0e009b`, and [Foundry](../foundry/) `master` at
 `5683db7dc79cace93363fe3465e20792b859bec9`. The root gitlinks pin those exact commits and
-official Kernel v3.3 at `cd697c7e21715d015e0643af22310a99aa17433b`, so a fresh recursive
-clone reproduces the toolchain and migration fixture.
+the Soldeer lock pins official Kernel v3.3 at
+`cd697c7e21715d015e0643af22310a99aa17433b`, so a fresh recursive clone plus
+`forge soldeer install` reproduces the toolchain and migration fixture.
 
 | Capability | State |
 |---|---|
@@ -29,7 +30,7 @@ clone reproduces the toolchain and migration fixture.
 | `forge build` compiling `@future` sources natively | **Done** — refreshed foundry-core `f415f6fef0a62f44c7faa83daa8e37b14f0e009b` adds `EvmVersion::Future`; `evm_version = "@future"` plus `experimental = true` drive the patched solc over standard JSON |
 | Current-spec Foundry promotion | **Done** — 27/27 primitives, 44/44 Anvil unit, and 30/30 Anvil integration tests pass |
 | `setFrameTx` / `clearFrameTx` cheatcodes | **Done** |
-| `forge test` executing frame accounts | **Done** — 260/260 tests across 15 suites, including malformed/wrong signature refusal for supported paths, real Kernel v3.3 and EIP-7702 migration fixtures, all account roles, both rollback paths, and the paymaster matrix |
+| `forge test` executing frame accounts | **Done** — 259/259 tests across 15 suites, including malformed/wrong signature refusal for supported paths, real Kernel v3.3 and EIP-7702 migration fixtures, all account roles, both rollback paths, and the paymaster matrix |
 | anvil accepting baseline type `0x06` transactions | **Done** — explicit opt-in; decode, validate, and execute through the integration suite |
 | Post-quantum verification | Not shipped — ML-DSA must use an `ARBITRARY` witness and validation-frame/custom-verifier logic; no verifier, account, paymaster, or raw Anvil path is included |
 | Atomic batches and default code in anvil | **Done** — terminator rollback, mid-batch skip, signature-index selection all pinned |

@@ -4,8 +4,8 @@ Everything needed to write and run [EIP-8141](https://eips.ethereum.org/EIPS/eip
 a patched **revm/Foundry** that executes them, a patched **solc** that compiles them, and
 worked smart accounts with tests.
 
-EIP-8141 is a **draft**. The upstream spec base and each current submodule gitlink are
-recorded at exact commits in [VERSIONS.md](VERSIONS.md).
+EIP-8141 is a **draft**. The upstream spec base, toolchain gitlinks, and Solidity package
+pins are recorded exactly in [VERSIONS.md](VERSIONS.md).
 
 > [!note] Reproducible current stack
 > The EIP-8141 stack is published on each fork's default branch: Solidity `develop` at
@@ -15,16 +15,18 @@ recorded at exact commits in [VERSIONS.md](VERSIONS.md).
 > `5683db7dc79cace93363fe3465e20792b859bec9`. The real Kernel v3.3 migration fixture uses
 > official ZeroDev Kernel commit `cd697c7e21715d015e0643af22310a99aa17433b`. Foundry
 > promotion passed 27/27 primitives, 44/44 Anvil unit, and 30/30 Anvil integration tests;
-> the contract project passes 260/260 tests across 15 suites. The root gitlinks pin these
-> exact published commits, so a fresh recursive clone reproduces the stack. To inspect later
-> primary-branch movement without changing those pins, use
+> the contract project passes 259/259 tests across 15 suites. The root gitlinks pin the
+> toolchain forks, while [`contracts/soldeer.lock`](contracts/soldeer.lock) pins Kernel,
+> Solady, forge-std, and ExcessivelySafeCall. To inspect later primary-branch movement without
+> changing the toolchain pins, use
 > [the fetch-only submodule sync command](.claude/commands/sync-submodules.md).
 
 ## Getting started
 
-Nothing gets installed: the patched solc and forge/anvil are built inside the submodules
-and invoked by path, so your existing `forge` (`~/.foundry/bin`) and any system solc stay
-untouched.
+The patched solc and forge/anvil are built inside the toolchain submodules and invoked by
+path, so your existing `forge` (`~/.foundry/bin`) and any system solc stay untouched.
+Solidity packages install locally under the ignored `contracts/dependencies/` directory via
+Soldeer.
 
 **1. Get the current stack** (the gitlinks pin its exact revm/foundry commits; stale
 binaries built from other submodule states will fail):
@@ -54,6 +56,7 @@ cargo build --manifest-path foundry/Cargo.toml --locked --bin forge --bin anvil
 
 ```bash
 cd contracts
+../foundry/target/debug/forge soldeer install              # restores soldeer.lock exactly
 ../foundry/target/debug/forge test --allow-local-compiler  # trusts the pinned local solc
 ```
 
@@ -158,8 +161,10 @@ function validate(uint256 signatureIndex) external {
 
 Deriving the current frame's allowed scope lets the same account validate and pay for
 itself (`BOTH`), validate while a paymaster supplies ETH (`EXECUTION`), or pay for another
-already-approved sender (`PAYMENT`). Every current paymaster likewise receives one routing
-index through `sponsorTransaction(uint256)` (selector `0x217de4d8`).
+already-approved sender in sponsor-only mode (`PAYMENT`). The last role uses the account's
+normal `validate` entry point and does not require a paymaster contract. Every current
+paymaster remains available as a specialized alternative and receives one routing index
+through `sponsorTransaction(uint256)` (selector `0x217de4d8`).
 
 Post-quantum schemes such as ML-DSA are not native signature schemes today. They must use an
 `ARBITRARY` witness and validation-frame or custom-verifier logic that binds the proof to the
@@ -181,7 +186,7 @@ default payer path without compatible account code or delegation.
 | [`revm/`](revm/) | Submodule — executes the EIP-8141 opcode surface plus host-supplied fixture context |
 | [`foundry-core/`](foundry-core/) | Submodule — teaches Foundry's compiler layer the experimental `@future` EVM target |
 | [`foundry/`](foundry/) | Submodule — `forge` with the frame cheatcodes and opt-in Anvil transaction path |
-| [`contracts/vendor/kernel-v3.3/`](contracts/vendor/kernel-v3.3/) | Official ZeroDev Kernel v3.3 fixture submodule, pinned for real factory/proxy/ERC-4337 migration tests |
+| [`contracts/soldeer.lock`](contracts/soldeer.lock) | Exact Kernel v3.3, Solady, forge-std, and ExcessivelySafeCall package resolution; `forge soldeer install` restores them under `contracts/dependencies/` |
 | [`spec/EIP8141.md`](spec/EIP8141.md) | Current-master normative overlay and a non-normative tooling-fixture appendix |
 | [`contracts/`](contracts/) | The Foundry project: accounts in `src/accounts`, policy in `src/policy`, EIP helper libraries in `src/eips`, **all tests** in `test/` |
 | [`guides/`](guides/) | Build, write, and what does not work yet |
@@ -243,7 +248,7 @@ To add an account:
 2. Inherit [`contracts/test/AccountTestSuite.sol`](contracts/test/AccountTestSuite.sol) and
    implement `accountUnderTest()` plus `accountAuthorizationSignatures()`. The inherited
    cases exercise self-payment, external
-   sponsorship, paying for another sender, shifted signature routing, exact scopes, and ETH
+   sponsorship, sponsoring another sender with PAYMENT-only authority, shifted signature routing, exact scopes, and ETH
    funding. The inherited negatives also show that out-of-range routing, wrong
    secp256k1/P256 signatures, and a selected malformed `ARBITRARY` signature fail. Add
    account-specific policy cases alongside them. If the policy trusts keys or proof forms not
@@ -329,7 +334,7 @@ All under [`contracts/src/accounts`](contracts/src/accounts), each with notes in
 | `P256Account.sol` | Account | Native protocol-verified P256 metadata, `keccak256(qx || qy)[12:]` signer identity, and self-call key rotation |
 | `WebAuthnAccount.sol` | Account | A strict WebAuthn assertion carried as an `ARBITRARY` witness and verified at precompile `0x100` |
 | [`KernelV33FrameAccount.sol`](contracts/src/accounts/KernelV33FrameAccount.sol) | Migration adapter | A 1,014-byte, storage-free compatibility shim for an unhooked Kernel v3.3 ECDSA root; it adds Frame validation and delegates the complete legacy surface to the exact prior implementation |
-| [`EOA7702FrameAccount.sol`](contracts/src/accounts/EOA7702FrameAccount.sol) | Migration adapter | Same-address EIP-7702 delegation with secp256k1-only Frame approval and a self-only legacy execution path |
+| [`EOA7702FrameAccount.sol`](contracts/src/accounts/EOA7702FrameAccount.sol) | Migration adapter | Same-address EIP-7702 delegation with secp256k1-only Frame approval and plain ETH receipt |
 | `SponsoringPaymaster.sol` | Paymaster | Third-party sponsorship authorized by a protocol-verified secp256k1 signer |
 | `P256Paymaster.sol` | Paymaster | Third-party sponsorship authorized by a protocol-verified native P256 signer |
 | `WebAuthnPaymaster.sol` | Paymaster | Third-party sponsorship authorized by a strict WebAuthn assertion |
@@ -387,7 +392,8 @@ Proof of concept. Compiler support, synthetic Forge execution, and the opt-in An
 path exist in the current pinned toolkit stack, including nested receipts, parity traces,
 canonical raw-byte fork replay, and expiry-verifier activation. The
 default branches (`develop`, `main`, `main`, and `master`, respectively) for Solidity, revm,
-foundry-core, and Foundry contain the pinned stack and reproduce from a fresh recursive clone.
+foundry-core, and Foundry contain the pinned stack. A fresh recursive clone plus
+`forge soldeer install` reproduces the toolchain and contract dependencies.
 Keyed-nonce/recent-root/POST_TX
 wire and state integration, public-pool policy, gossip, and Amsterdam state-gas compatibility
 are not implemented. ML-DSA is not a native scheme and no ready verifier is shipped;

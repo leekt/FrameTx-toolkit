@@ -83,7 +83,7 @@ scope.
 |---|---|---|---|
 | Validate and pay for itself | multisig, also `tx.sender` | `0x3` (`BOTH`) | Grants execution and pays `max_cost` |
 | Validate with a paymaster | multisig, also `tx.sender` | `0x2` (`EXECUTION`) | Grants execution; a later pay frame pays |
-| Pay for another account | multisig, different from `tx.sender` | `0x1` (`PAYMENT`) | Pays after the sender grants execution |
+| Sponsor another account (payment only) | multisig, different from `tx.sender` | `0x1` (`PAYMENT`) | Pays after the sender grants execution |
 
 Scope zero cannot approve anything and fails. `APPROVE` also enforces that the scope is a
 subset of the frame flags, that execution approval targets `tx.sender`, and that payment
@@ -104,7 +104,7 @@ approval follows an existing execution approval.
 | 1 | `VERIFY` | `0x1` | paymaster | paymaster-specific | Approve payment |
 | 2… | `SENDER` | operation flags | owner-selected target | operation calldata | Execute the signed batch |
 
-### Paying for another sender
+### Sponsoring another sender (payment only)
 
 The other sender first approves execution. A later flags-`0x1` VERIFY frame targets this
 funded multisig and calls the same `validate(...)`; threshold owners thereby approve this

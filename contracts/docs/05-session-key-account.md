@@ -92,7 +92,7 @@ After authentication and any session restrictions, `validate` reads the current 
 |---|---|---|---|
 | Validate and pay for itself | session account, also `tx.sender` | `0x3` (`BOTH`) | Grants execution and pays `max_cost` |
 | Validate with a paymaster | session account, also `tx.sender` | `0x2` (`EXECUTION`) | Grants execution; a later pay frame pays |
-| Pay for another account | session account, different from `tx.sender` | `0x1` (`PAYMENT`) | Pays after that sender grants execution |
+| Sponsor another account (payment only) | session account, different from `tx.sender` | `0x1` (`PAYMENT`) | Pays after that sender grants execution |
 
 `APPROVE` enforces the target and scope rules. A PAYMENT-only frame is legal for a target
 different from `tx.sender`, but it must follow the sender's successful execution approval.

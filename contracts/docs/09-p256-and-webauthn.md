@@ -261,7 +261,7 @@ therefore support all three reusable account roles:
 |---|---:|---|---|
 | Validate and pay for itself | `BOTH` (`0x03`) | Supported | Supported |
 | Validate while a later paymaster pays | `EXECUTION` (`0x02`) | Supported | Supported |
-| Pay for another already-approved sender | `PAYMENT` (`0x01`) | Supported in the EVM and through direct/private inclusion | Supported; immutable validation avoids a third-party SLOAD |
+| Sponsor another already-approved sender (payment only) | `PAYMENT` (`0x01`) | Supported in the EVM and through direct/private inclusion | Supported; immutable validation avoids a third-party SLOAD |
 
 The last WebAuthn cell is not a blanket public-mempool guarantee. When an account with code
 is used as a separate pay target, it is a non-canonical paymaster. Under the current draft it

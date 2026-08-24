@@ -29,8 +29,9 @@ machinery rather than storage-only mocks:
 - [`KernelV33FrameAccount.sol`](../contracts/src/accounts/KernelV33FrameAccount.sol) and
   [`KernelV33Migration.t.sol`](../contracts/test/KernelV33Migration.t.sol) exercise a deployed
   Kernel v3.3 proxy through a compact compatibility shim. The fixture imports the actual
-  ZeroDev factory, Kernel implementation, and ECDSA root validator from
-  [`contracts/vendor/kernel-v3.3`](../contracts/vendor/kernel-v3.3), pinned to official commit
+  ZeroDev factory, Kernel implementation, and ECDSA root validator from the Soldeer
+  dependency declared in [`contracts/foundry.toml`](../contracts/foundry.toml) and locked by
+  [`contracts/soldeer.lock`](../contracts/soldeer.lock), pinned to official commit
   [`cd697c7e21715d015e0643af22310a99aa17433b`](https://github.com/zerodevapp/kernel/tree/cd697c7e21715d015e0643af22310a99aa17433b).
 - [`EOA7702FrameAccount.sol`](../contracts/src/accounts/EOA7702FrameAccount.sol) and
   [`EOA7702Migration.t.sol`](../contracts/test/EOA7702Migration.t.sol) exercise same-address
@@ -38,8 +39,8 @@ machinery rather than storage-only mocks:
 
 Both adapters' test fixtures inherit the shared
 [`AccountTestSuite`](../contracts/test/AccountTestSuite.sol), which covers self-validation and
-payment (`BOTH`), validation under external sponsorship (`EXECUTION`), and payment for another
-sender (`PAYMENT`). The shared
+payment (`BOTH`), validation under external sponsorship (`EXECUTION`), and sponsoring another
+sender with payment-only authority (`PAYMENT`). The shared
 [`PaymasterTestSuite`](../contracts/test/PaymasterTestSuite.sol) also requires every example
 paymasters to sponsor each migrated account. These are real contract/delegation and opcode
 tests under synthetic `setFrameTx` context; they do not turn the migration fixtures into a
@@ -258,8 +259,8 @@ The EOA fixture delegates the authority to `EOA7702FrameAccount` and proves:
 
 - the EOA address and balance remain unchanged and its exact code is the 23-byte
   `0xef0100 || implementation` designator;
-- the authority can still call its own delegated `execute` entry point, the downstream call
-  retains the EOA as caller, and a third party cannot use that executor;
+- the delegated EOA can still receive plain ETH transfers without exposing a generic call
+  executor;
 - Frame validation remains secp256k1-only, binds the signer to `address(this)`, and rejects a
   same-address P256 metadata collision instead of broadening the original EOA root;
 - the inherited account suite covers `BOTH`, `EXECUTION`, and `PAYMENT`, and all example
