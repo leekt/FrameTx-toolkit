@@ -11,7 +11,7 @@ import {IFrameAccount} from "./IFrameAccount.sol";
 ///         with zero value, and only until the key's expiry.
 ///
 /// Before this code runs, the protocol has verified every native signature
-/// (SECP256K1, P256, or the toolkit-local ML-DSA-44 scheme) against either
+/// (SECP256K1 or P256) against either
 /// `compute_sig_hash(tx)` or its explicit digest. This account never performs
 /// cryptographic verification: it asks SIGPARAM which key signed, requires the
 /// canonical transaction-hash case, and applies policy.
@@ -114,17 +114,13 @@ contract SessionKeyAccount is IFrameAccount {
         view
         returns (bool ownerSigned, uint64 sessionValidUntil)
     {
-        // ARBITRARY entries carry no resolved signer — sigSigner on one is an
-        // exceptional halt, so filter by scheme first.
-        if (FrameTxLib.sigScheme(signatureIndex) == FrameTxLib.SCHEME_ARBITRARY) {
-            return (false, 0);
-        }
-
         // msg == 0 means the signature is over compute_sig_hash(tx), which
         // commits to the entire frame list. An explicit 32-byte msg does not,
         // and must never authorize EXECUTION.
         if (!FrameTxLib.signedThisTx(signatureIndex)) return (false, 0);
 
+        // Native signature cryptography was already checked by the protocol.
+        // ARBITRARY has no resolved signer, so this read fails closed.
         address signer = FrameTxLib.sigSigner(signatureIndex);
         if (signer == owner) return (true, 0);
         sessionValidUntil = sessionKeys[signer];

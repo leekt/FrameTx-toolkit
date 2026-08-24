@@ -6,8 +6,6 @@ and `forge test` cover the whole project. The Foundry fork maps `@future` to the
 pre-Amsterdam **Osaka** EVM: this keeps the frame profile away from Amsterdam's incompatible
 node-level state-gas rules while activating the [EIP-7951 P256VERIFY
 precompile](https://eips.ethereum.org/EIPS/eip-7951) at `0x100` for WebAuthn verification.
-The patched host also recognizes the toolkit-local, non-normative native ML-DSA-44 scheme
-`0x03`; it is not an EVM precompile or an upstream allocation.
 
 ## What runs where
 
@@ -30,16 +28,16 @@ Error: foundry config error: Unknown evm version: @future for setting `evm_versi
 Execution is patched separately: stock revm treats `0xaa` and `0xb0`–`0xb9` as invalid.
 The account tests install compiled runtimes with `vm.etch` (from forge's own artifacts,
 via `vm.getDeployedCode`) and execute them under the patched revm with host context from
-the `setFrameTx` cheatcode. That cheatcode copies host-supplied context; it does not make
-fixture nonce keys, recent roots, POST_TX traces, diffs, or events normative transaction
-data. This is real opcode execution, not a Solidity mock.
+the `setFrameTx` cheatcode. That cheatcode copies host-supplied recent roots, POST_TX traces,
+diffs, and events; it does not make them normative transaction data. This is real opcode
+execution, not a Solidity mock.
 
 ## The policy/glue split, and why it is good design
 
 EIP-8141 hands the account a much smaller job than ERC-4337 does. Before any frame runs, the
-protocol verifies every upstream `SECP256K1`/native `P256` signature and every toolkit-local
-ML-DSA-44 signature against either the canonical transaction hash or its explicit digest, so
-accounts using those schemes do not repeat cryptography. What remains is a **policy**
+protocol verifies every `SECP256K1`/native `P256` signature against either the canonical
+transaction hash or its explicit digest, so accounts using those schemes do not repeat
+cryptography. What remains is a **policy**
 question: which keys signed the canonical transaction hash, and should those keys approve
 the frames about to execute? `ARBITRARY` entries are the
 deliberate exception: their witness is contract-verified. `WebAuthnAccount` uses
@@ -59,8 +57,8 @@ The frame glue reads the selected entries with `sigparam`, inspects frames with
 account tests in `test/`.
 
 The ordinary Solidity accounts implement
-`IFrameAccount.validate(uint256 signatureIndex)` (selector `0xce4d01a3`), as do the two Yul
-accounts at the ABI level. Their VERIFY frame passes exactly one assigned entry instead of
+`IFrameAccount.validate(uint256 signatureIndex)` (selector `0xce4d01a3`). Their VERIFY frame
+passes exactly one assigned entry instead of
 making the account scan the signature envelope. `MultisigAccount` implements the separate
 `IMultisigFrameAccount.validate(uint256[] signatureIndices)` entry point (selector
 `0x25b90494`) because its threshold policy genuinely aggregates entries. Every current
@@ -71,16 +69,15 @@ from the current frame: `BOTH` when it validates and pays for itself, `EXECUTION
 external paymaster pays, and `PAYMENT` when it acts as the payer for another already-approved
 sender.
 
-The generic `OwnerAccount`, `SessionKeyAccount`, and both Yul runtimes accept any supported
-native scheme whose resolved identity matches their configured address. `MultisigAccount`
-explicitly admits secp256k1, P256, and ML-DSA-44 identities in one threshold. The dedicated
-`P256*`, `WebAuthn*`, `MLDSA*`, and secp256k1 sponsoring contracts remain exact-algorithm
-policies; adding scheme `0x03` does not widen them.
+The generic `OwnerAccount` and `SessionKeyAccount` accept any protocol-validated scheme when
+its resolved identity matches their configured address. `MultisigAccount` explicitly admits
+secp256k1 and P256 identities in one threshold. The dedicated `P256*`, `WebAuthn*`, and
+secp256k1 sponsoring contracts remain exact-algorithm policies.
 
 Default empty-code accounts are a separate protocol policy and remain secp256k1-only. A
 secp256k1 owner entry at index 1 can count in a multisig's execution selection and be reused
-by that same owner's later default PAYMENT frame, with no second signature. ML-DSA-44 cannot
-use this empty-code payer path without compatible code or delegation.
+by that same owner's later default PAYMENT frame, with no second signature. An `ARBITRARY`
+post-quantum witness cannot use this empty-code payer path without compatible code or delegation.
 
 The last role always works at the EVM level and through direct or private inclusion. Most
 examples, including the rotatable `P256Account`, read policy from storage. When such an
@@ -95,19 +92,15 @@ the stock-tooling boundary just happens to fall in the same place.
 
 ## Account and paymaster examples
 
-The reusable paymaster matrix treats the two Yul spellings as distinct targets and now also
-includes the two migration adapters, giving ten account targets in total.
+The reusable paymaster matrix includes the account examples and both migration adapters.
 
 | Account | Authorization path | Mutable validation policy? |
 |---|---|---|
-| `account.yul` | One selected supported native signer | Owner in storage |
-| `account-builtins.yul` | The same one-index policy through patched builtins | Owner in storage |
 | `OwnerAccount` | Selected supported native signer | Owner in storage |
 | `MultisigAccount` | Threshold over selected native signers | Owners and threshold in storage |
 | `SessionKeyAccount` | Owner or frame-constrained session key | Policy in storage |
 | `P256Account` | Selected protocol-verified native P256 signer | Rotatable signer in storage |
 | `WebAuthnAccount` | One selected, contract-verified `ARBITRARY` assertion | Immutable credential configuration |
-| `MLDSAAccount` | Selected toolkit-local native ML-DSA-44 signer | Rotatable signer in storage |
 | [`KernelV33FrameAccount`](src/accounts/KernelV33FrameAccount.sol) | Existing, unhooked Kernel v3.3 ECDSA root after a same-address proxy upgrade | Existing Kernel/validator storage; the 1,014-byte compatibility shim adds no storage, rejects hooked roots, and delegates the complete legacy surface to the exact prior implementation |
 | [`EOA7702FrameAccount`](src/accounts/EOA7702FrameAccount.sol) | Existing EOA secp256k1 identity through EIP-7702 delegation | No adapter storage; EOA remains the authority |
 
@@ -116,13 +109,12 @@ includes the two migration adapters, giving ten account targets in total.
 | `SponsoringPaymaster` | Native secp256k1 sponsor signer | Non-canonical |
 | `P256Paymaster` | Native P256 sponsor signer | Non-canonical |
 | `WebAuthnPaymaster` | Strict WebAuthn assertion | Non-canonical |
-| `MLDSAPaymaster` | Toolkit-local native ML-DSA-44 sponsor signer | Non-canonical |
 
 The P256 and WebAuthn constructors, transaction entries, exact WebAuthn witness format, and
 security boundaries are documented in
 [`docs/09-p256-and-webauthn.md`](docs/09-p256-and-webauthn.md).
-The exact 3,732-byte ML-DSA wire, domain-separated signer, provisional gas, contracts,
-key lifecycle, default-code boundary, and audit warning are in
+The post-quantum integration boundary, including the required `ARBITRARY` witness path and
+the absence of a shipped ML-DSA verifier, account, or paymaster, is documented in
 [`docs/10-pq.md`](docs/10-pq.md).
 The production migration adapters, official Kernel pin, legacy execution coverage, and
 rollback boundaries are documented in [`../guides/05-migration.md`](../guides/05-migration.md#executable-migration-examples).
@@ -156,11 +148,11 @@ trusted protocol signature, calldata selecting its authorization index, and an a
 max-cost fixture through `_paymasterUnderTest()`, `_paymasterTestSignature()`,
 `_paymasterTestCall(uint256)`, and `_paymasterTestMaxCost()`. Its shared, shifted signature
 envelope tests that the paymaster sponsors `OwnerAccount`, `MultisigAccount`,
-`SessionKeyAccount` through its owner, both minimal Yul runtimes, `P256Account`, and
-`WebAuthnAccount`, `MLDSAAccount`, the migrated Kernel v3.3 proxy, and the EIP-7702-delegated
+`SessionKeyAccount` through its owner, `P256Account`, `WebAuthnAccount`, the migrated Kernel
+v3.3 proxy, and the EIP-7702-delegated
 EOA, while refusing a misrouted paymaster index.
-`SponsoringPaymasterTest`, `P256PaymasterTest`, `WebAuthnPaymasterTest`, and
-`MLDSAPaymasterTest` all inherit this ten-account matrix.
+`SponsoringPaymasterTest`, `P256PaymasterTest`, and `WebAuthnPaymasterTest` all inherit this
+matrix.
 Sender-specific signature policies can override `_preparePaymasterForAccount(address)` for
 per-sender setup. A paymaster authorized without a signature entry needs a policy-specific
 suite because this shared suite deliberately proves single-index signature routing.
@@ -168,13 +160,11 @@ The `_paymasterSuite*` address hooks avoid collisions with a paymaster that rese
 default fixture address.
 These are opcode-level approval tests under synthetic `setFrameTx` context; they do not prove
 wire admission, nonce transitions, or eventual ETH charging and refunds. Native P256 entries
-and native ML-DSA entries are already-verified metadata fixtures. WebAuthn tests execute a
+are already-verified metadata fixtures. WebAuthn tests execute a
 real P256 assertion through precompile `0x100`, but the assertion challenge is still a
-synthetic transaction hash. No Anvil WebAuthn end-to-end test is claimed. Native Rust
-transaction tests execute real ML-DSA-44 verification, and the Anvil suite submits the
-3,732-byte wire through production `MLDSAAccount`, including corrupt-signature admission and
-mined payer/debit/nonce/SENDER assertions. It also submits a raw native-P256 envelope and
-proves the secp256k1 multisig-owner/index-1 default-payer reuse layout.
+synthetic transaction hash. No Anvil WebAuthn end-to-end test is claimed, and no ML-DSA
+verifier or transaction path is shipped. The Anvil suite submits a raw native-P256 envelope
+and proves the secp256k1 multisig-owner/index-1 default-payer reuse layout.
 
 ## Usage
 

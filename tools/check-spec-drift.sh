@@ -24,7 +24,7 @@ curl -fsSL "$CURRENT_URL" -o "$current"
 if diff -q "$pinned" "$current" >/dev/null 2>&1; then
     echo "No upstream drift since the source pin."
     if ! diff -q "$pinned" "$OVERLAY" >/dev/null 2>&1; then
-        echo "The local document differs by design: upstream is preserved as the normative body, with clearly marked toolkit notes, the experimental ML-DSA-44 scheme 0x03, and a tooling appendix."
+        echo "The local document differs by design: upstream is preserved as the normative body, with clearly marked toolkit notes and a tooling appendix."
     fi
     exit 0
 fi

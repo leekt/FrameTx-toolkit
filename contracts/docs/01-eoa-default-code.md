@@ -71,13 +71,12 @@ Four things are load-bearing and easy to get wrong:
    signature entry must carry an explicit 20-byte `signer` equal to it.
 
 Note that the protocol has already verified every supported native signature in the envelope
-*before any frame runs* — upstream `SECP256K1`/`P256`, plus this toolkit's experimental
-ML-DSA-44 scheme `0x03`. The default code does no `ecrecover`: it
+*before any frame runs* — `SECP256K1` and `P256`. The default code does no `ecrecover`: it
 only asks "is the already-verified signer at index N the account I am validating for?". This is
 the same idea the smart-account examples in this repo implement with `SIGPARAM` — the default
 code is just the protocol-supplied version of it. Its policy nevertheless remains
-**secp256k1-only**: a P256 or ML-DSA-44 entry at the selected index is rejected. A codeless
-post-quantum key identity needs account code or a delegation to compatible code; see
+**secp256k1-only**: a P256 or `ARBITRARY` entry at the selected index is rejected. A codeless
+post-quantum account needs account code or a delegation to compatible code; see
 [`10-pq.md`](10-pq.md).
 
 The resulting `APPROVE(0x3)` does what it does for any account: sets `sender_approved = true`,
@@ -143,7 +142,8 @@ fallback.
 
 There is one envelope entry and no second signature: both policies consume the same
 empty-`msg` signature over `compute_sig_hash(tx)`. This reuse is specific to a secp256k1
-default payer. Scheme `0x03` cannot replace it unless the payer has compatible code or the
+default payer. An `ARBITRARY` post-quantum witness cannot replace it unless the payer has
+compatible code or the
 protocol's default-code rule changes.
 
 ## What the Anvil tests prove
@@ -171,7 +171,7 @@ state. Its default-code cases pin both self-relay and sponsorship:
 The positive self-relay integration also checks that the sender nonce advances once, the
 payer loses value plus a non-zero fee, the SENDER target receives value and writes storage,
 and the mined transaction is retrievable as type `0x06`. These tests are in pinned Foundry
-`master` commit `6cfbfd4e76cb275e1974caebfbf3b88d13c70c37`; its 31/31 Anvil integration
+`master` commit `5683db7dc79cace93363fe3465e20792b859bec9`; its 30/30 Anvil integration
 tests pass. The root gitlink records that published default-branch commit, so a fresh
 recursive clone reproduces them. See
 [VERSIONS.md](../../VERSIONS.md#reproducibility-status) for the exact reproducible stack.

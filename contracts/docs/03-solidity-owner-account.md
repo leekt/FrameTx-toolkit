@@ -23,9 +23,9 @@ if (scope == FrameTxLib.SCOPE_NONE) revert NothingToApprove();
 FrameTxLib.approve(scope);
 ```
 
-The protocol verified every supported native signature before any frame ran: `SECP256K1`,
-`P256`, and this toolkit's experimental ML-DSA-44 scheme `0x03`. The contract is deciding
-which verified key identity it trusts and whether that key signed `compute_sig_hash(tx)`; it
+The protocol verified every supported native signature before any frame ran: `SECP256K1`
+and `P256`. The contract decides which verified key identity it trusts and whether that key
+signed `compute_sig_hash(tx)`; it
 is not repeating the cryptography. `ARBITRARY` entries are rejected before reading
 `resolved_signer`, because that field does not exist for that scheme.
 
@@ -97,7 +97,7 @@ For the selected owner entry:
 
 | Field | Requirement |
 |---|---|
-| `scheme` | Any supported native scheme: `SECP256K1`, `P256`, or toolkit-local `ML_DSA_44`; `ARBITRARY` is rejected |
+| `scheme` | Any protocol-validated scheme exposing the stored owner address; selecting `ARBITRARY` fails because it has no resolved signer |
 | `signer` | resolves to the stored owner address |
 | `msg` | empty, so the protocol checked `compute_sig_hash(tx)` |
 | `signature` | valid for the selected scheme; protocol-checked before frame execution |
@@ -107,10 +107,8 @@ key, the envelope should therefore carry the owner address explicitly. A non-emp
 `msg` is a valid signature over an explicit digest, but it does not commit to this frame
 transaction and is deliberately ignored.
 
-For an ML-DSA-44 owner, configure `owner` as
-`low20(keccak256(0x03 || publicKey))`, not as the public key or an unrelated EOA address.
-The non-normative wire, gas, audit warning, and dedicated scheme-enforcing account are
-documented in [`10-pq.md`](10-pq.md).
+This account cannot authorize an ML-DSA witness: post-quantum validation must use an
+`ARBITRARY`-aware verifier and a policy designed for its output. See [`10-pq.md`](10-pq.md).
 
 ## No `execute()` function
 
@@ -167,9 +165,9 @@ implementing `accountUnderTest()` and `accountAuthorizationSignatures()`.
 
 ## Security notes
 
-- Filtering the scheme before requesting `resolved_signer` avoids an exceptional halt on
-  selected `ARBITRARY` entries. An out-of-range index still halts at the bounds check and
-  makes validation fail.
+- No scheme whitelist is needed for this address policy. The protocol already checked native
+  signature cryptography, while requesting `resolved_signer` for `ARBITRARY` exceptional-halts
+  and makes validation fail. Exact-algorithm accounts should still enforce their scheme.
 - The empty-`msg` check is load-bearing. Accepting an explicit digest would let an unrelated
   owner signature authorize a frame list it never committed to.
 - `APPROVE` itself checks that the executing code is the resolved frame target, so an inner

@@ -122,14 +122,9 @@ contract SponsoringPaymasterTest is PaymasterTestSuite {
         IFrameVm.FrameTxSignature[] memory sigs = new IFrameVm.FrameTxSignature[](2);
         sigs[0] = secpSig(SENDER_ACCOUNT);
         sigs[1] = secpSig(SPONSOR);
-        uint256[] memory nonceKeys = legacyNonceKeys();
-
         ctx = IFrameVm.FrameTx({
             sender: SENDER_ACCOUNT,
             nonce: 0,
-            legacyNonce: 0,
-            nonceKeys: nonceKeys,
-            nonceKeysHash: LEGACY_NONCE_KEYS_HASH,
             stateGasLeft: 0,
             sigHash: bytes32(uint256(0xf00d)),
             maxCost: maxCost,
@@ -200,12 +195,6 @@ contract SponsoringPaymasterTest is PaymasterTestSuite {
     function test_p256SchemeRefused() public {
         IFrameVm.FrameTx memory ctx = _payCtx();
         ctx.signatures[SPONSOR_SIG].scheme = 2;
-        assertRefusesFrame(paymaster, ctx, "this paymaster accepts SECP256K1 only");
-    }
-
-    function test_mldsaSchemeRefused() public {
-        IFrameVm.FrameTx memory ctx = _payCtx();
-        ctx.signatures[SPONSOR_SIG] = mldsaSig(SPONSOR);
         assertRefusesFrame(paymaster, ctx, "this paymaster accepts SECP256K1 only");
     }
 

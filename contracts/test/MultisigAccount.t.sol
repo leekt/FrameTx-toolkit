@@ -213,28 +213,6 @@ contract MultisigAccountTest is AccountTestSuite {
         );
     }
 
-    /// Every supported native scheme exposes an already-verified resolved signer.
-    function test_p256AndMLDSAOwnerEntriesCount() public {
-        IFrameVm.FrameTxSignature[] memory sigs = _sigs(OWNER_A, OWNER_B);
-        sigs[0] = p256Sig(OWNER_A);
-        sigs[1] = mldsaSig(OWNER_B);
-        assertApprovesFrame(
-            account,
-            _ctx(SCOPE_BOTH, sigs, selected(0, 1)),
-            "P256 and ML-DSA-44 owner identities must both count"
-        );
-    }
-
-    function test_mixedSecp256k1AndMLDSAOwnerEntriesCount() public {
-        IFrameVm.FrameTxSignature[] memory sigs = _sigs(OWNER_A, OWNER_B);
-        sigs[1] = mldsaSig(OWNER_B);
-        assertApprovesFrame(
-            account,
-            _ctx(SCOPE_BOTH, sigs, selected(0, 1)),
-            "a secp256k1 owner and an ML-DSA-44 owner must reach threshold"
-        );
-    }
-
     function test_arbitraryOwnerEntryDoesNotCount() public {
         IFrameVm.FrameTxSignature[] memory sigs = _sigs(OWNER_A, OWNER_B);
         sigs[1] = IFrameVm.FrameTxSignature({

@@ -12,7 +12,6 @@ import {P256Account} from "../src/accounts/P256Account.sol";
 contract P256AccountTest is AccountTestSuite {
     uint8 private constant SCHEME_SECP256K1 = 1;
     uint8 private constant SCHEME_P256 = 2;
-    uint8 private constant SCHEME_ML_DSA_44 = 3;
     uint256 private constant P256_KEY =
         0x234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1;
     uint256 private constant OTHER_P256_KEY =
@@ -104,14 +103,6 @@ contract P256AccountTest is AccountTestSuite {
             account,
             _context(SCHEME_SECP256K1, signer, bytes32(0), 0, SCOPE_BOTH),
             "this policy must require the P256 protocol scheme"
-        );
-    }
-
-    function test_mldsaEntryFromSameAddressIsRefused() public {
-        assertRefusesFrame(
-            account,
-            _context(SCHEME_ML_DSA_44, signer, bytes32(0), 0, SCOPE_BOTH),
-            "an ML-DSA-44 identity must not masquerade as the configured P256 key"
         );
     }
 

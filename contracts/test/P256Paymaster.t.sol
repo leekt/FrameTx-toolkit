@@ -10,7 +10,6 @@ import {P256Paymaster} from "../src/accounts/P256Paymaster.sol";
 contract P256PaymasterTest is PaymasterTestSuite {
     uint8 private constant SCHEME_SECP256K1 = 1;
     uint8 private constant SCHEME_P256 = 2;
-    uint8 private constant SCHEME_ML_DSA_44 = 3;
     uint256 private constant P256_KEY =
         0x4567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef123;
     uint256 private constant OTHER_P256_KEY =
@@ -141,19 +140,6 @@ contract P256PaymasterTest is PaymasterTestSuite {
                 SCOPE_PAYMENT
             ),
             "the paymaster must require the P256 protocol scheme"
-        );
-    }
-
-    function test_mldsaSponsorEntryIsRefused() public {
-        assertRefusesFrame(
-            paymaster,
-            _payContext(
-                _singleSignature(SCHEME_ML_DSA_44, sponsorSigner, bytes32(0)),
-                0,
-                0.5 ether,
-                SCOPE_PAYMENT
-            ),
-            "an ML-DSA-44 identity must not masquerade as the configured P256 sponsor"
         );
     }
 

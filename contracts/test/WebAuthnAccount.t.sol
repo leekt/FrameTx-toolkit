@@ -210,14 +210,6 @@ contract WebAuthnAccountTest is AccountTestSuite {
         );
     }
 
-    function test_nativeMLDSAEntryCannotMasqueradeAsWebAuthn() public {
-        assertRefusesFrame(
-            account,
-            _context(mldsaSig(address(0xA44)), 0),
-            "resolved ML-DSA-44 metadata is not a WebAuthn assertion"
-        );
-    }
-
     function test_explicitMessageArbitraryEntryIsRefused() public {
         assertRefusesFrame(
             account,

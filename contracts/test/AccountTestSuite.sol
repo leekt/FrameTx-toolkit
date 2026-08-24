@@ -379,6 +379,62 @@ abstract contract AccountTestSuite is FrameTest {
         );
     }
 
+    /// Every account policy must fail closed when its selected authorization is
+    /// replaced by an ARBITRARY entry whose witness is malformed for the policy.
+    /// Generic native-signature accounts fail when ARBITRARY has no resolved
+    /// signer; contract-verified accounts such as WebAuthn reject the bad witness.
+    function test_accountSuite_rejectsMalformedArbitrarySignature() public {
+        (, uint256 firstAuthorizationIndex) = conformanceSignatures();
+        IFrameVm.FrameTx memory ctx =
+            selfPayContext(accountValidationCalldata(firstAuthorizationIndex));
+        ctx.signatures[firstAuthorizationIndex] = arbitrarySig(hex"deadbeef");
+
+        assertRefusesFrame(
+            accountUnderTest(),
+            ctx,
+            "a malformed ARBITRARY signature must not authorize the account"
+        );
+    }
+
+    /// `setFrameTx` models native entries after protocol verification, so raw
+    /// native signature corruption cannot reach account bytecode here. These
+    /// cases instead prove that wrong resolved native identities fail closed for
+    /// every supported protocol scheme.
+    function test_accountSuite_rejectsWrongSecp256k1Signature() public {
+        _assertWrongNativeSignatureIsRefused(
+            1, "a wrong secp256k1 signature must not authorize the account"
+        );
+    }
+
+    function test_accountSuite_rejectsWrongP256Signature() public {
+        _assertWrongNativeSignatureIsRefused(
+            2, "a wrong P256 signature must not authorize the account"
+        );
+    }
+
+    function _assertWrongNativeSignatureIsRefused(uint8 scheme, string memory reason) private {
+        IFrameVm.FrameTxSignature[] memory authorization = accountAuthorizationSignatures();
+        IFrameVm.FrameTxSignature[] memory noPriorStrangers = new IFrameVm.FrameTxSignature[](0);
+        address stranger = _strangerNotInAuthorization(
+            SUITE_STRANGER_BASE + uint160(0x100 + scheme), authorization, noPriorStrangers, 0
+        );
+
+        IFrameVm.FrameTxSignature memory wrongSignature;
+        if (scheme == 1) {
+            wrongSignature = secpSig(stranger);
+        } else if (scheme == 2) {
+            wrongSignature = p256Sig(stranger);
+        } else {
+            revert("unsupported native test scheme");
+        }
+
+        (, uint256 firstAuthorizationIndex) = conformanceSignatures();
+        IFrameVm.FrameTx memory ctx =
+            selfPayContext(accountValidationCalldata(firstAuthorizationIndex));
+        ctx.signatures[firstAuthorizationIndex] = wrongSignature;
+        assertRefusesFrame(accountUnderTest(), ctx, reason);
+    }
+
     function test_accountSuite_acceptsOrdinaryEthFunding() public {
         address account = accountUnderTest();
         uint256 beforeBalance = account.balance;

@@ -3,14 +3,13 @@
 The frame builtins take raw hex params in a spec-defined operand order that is easy
 to get backwards (see the table in [05](05-session-key-account.md)). `FrameTxLib` is
 that assembly written once, behind named functions, so an account reads like the
-policy it implements — examples 03–06 are all written against it, and the raw
-opcodes survive only in the Yul account (02) and in this library's own bodies:
+policy it implements — the Solidity examples are all written against it, and the raw
+opcodes remain inside this library's own bodies:
 
 ```solidity
 import {FrameTxLib} from "../src/frame/FrameTxLib.sol";
 
 function validate(uint256 signatureIndex) external {
-    if (FrameTxLib.sigScheme(signatureIndex) == FrameTxLib.SCHEME_ARBITRARY) revert();
     if (!FrameTxLib.signedThisTx(signatureIndex)) revert();
     if (FrameTxLib.sigSigner(signatureIndex) != owner) revert();
 
@@ -35,36 +34,24 @@ surface or helpers built from it:
 | Frame (`FRAMEPARAM`, `FRAMEDATALOAD`, `FRAMEDATACOPY`) | `frameTarget` `frameGasLimit` `frameStateGasLimit` `frameMode` `frameFlags` `frameDataLength` `frameStatus` `frameExecutionGasUsed` `frameStateGasUsed` `frameAllowedScope` `frameIsAtomicBatch` `frameValue` `frameDataLoad` `frameDataSlice` `frameData` |
 | Expiry | `isExpiryFrame` `expiryDeadline` — recognise the expiry verifier frame and read its 8-byte deadline (see [05](05-session-key-account.md), "Expiry, without reading the clock") |
 | Signature (`SIGPARAM`, `SIGDATACOPY`) | `sigSigner` `sigScheme` `sigMsg` `signedThisTx` `sigLength` `sigDataSlice` `sigData` |
-| Fixture transaction (`TXPARAM 0x80`-`0x84`) | `legacyNonce` `nonceKeyCount` `nonceKeysHash` `recentRootReferenceCount` `firstNonceKey` |
 | Fixture recent roots (`RECENTROOTREFLOAD`) | `recentRootSourceId` `recentRootSlot` `recentRoot` |
 | Fixture POST_TX trace (`TXTRACE`) | `traceBalanceDiffCount` `traceStorageDiffCount` `traceDeploymentCount` `traceBalanceAccount` `traceBalanceBefore` `traceBalanceAfter` `traceStorageAccount` `traceStorageKey` `traceStorageBefore` `traceStorageAfter` `traceDeployedAccount` `traceDeployedCodeHash` `traceEventCount` `traceEventEmitter` `traceEventTopicCount` `traceEventTopic0` `traceEventTopic1` `traceEventTopic2` `traceEventTopic3` `traceEventDataLength` `traceGasPreCharge` `traceGasPayer` |
 | Fixture direct POST_TX diff (`TXDIFF`) | `storageValueBefore` `storageValueAfter` `accountBalanceBefore` `accountBalanceAfter` `accountCodeHashBefore` `accountCodeHashAfter` `accountStorageDiffCount` `accountStorageDiffIndex` `accountEventCount` `accountEventIndex` `accountDiffFlags` |
 | Fixture POST_TX event data (`EVENTDATACOPY`) | `eventDataSlice` `eventData` |
 | Approval (`APPROVE`) | `approve(scope)` `approve(scope, returnData)` |
 
-Constants cover upstream `SCHEME_ARBITRARY`, `SCHEME_SECP256K1`, and `SCHEME_P256`, modes
-0-2, `STATUS_*`, and `SCOPE_*`, plus the non-normative fixture `MODE_POST_TX`, the
-`EXPIRY_VERIFIER` predeploy address, and toolkit-local
-`SCHEME_ML_DSA_44 = 3`. Upstream EIP-8141 reserves scheme `0x03`; the constant is usable
-only with the experimental local verifier documented in [`10-pq.md`](10-pq.md).
+Constants cover `SCHEME_ARBITRARY`, `SCHEME_SECP256K1`, and `SCHEME_P256`, modes 0-2,
+`STATUS_*`, and `SCOPE_*`, plus the non-normative fixture `MODE_POST_TX` and the
+`EXPIRY_VERIFIER` predeploy address. EIP-8141 reserves scheme values `0x03` through `0xff`;
+the library deliberately defines no constants for them.
 
-`SCHEME_ML_DSA_44` is metadata, not an EVM cryptography API. The node verifies the
-3,732-byte native entry before frame execution, and `sigSigner` exposes its
-`low20(keccak256(0x03 || publicKey))` identity like the other native schemes. Raw ML-DSA
-bytes remain opaque to `sigData*`. The separate internal
-[`MLDSA44.sol`](../src/crypto/MLDSA44.sol) helper only enforces the 1,312-byte public-key
-shape and derives that identity for constructors and rotation; it does not verify a
-signature.
-
-Normative `TXPARAM(0x01)` is the scalar EIP-8141 wire nonce. A `setFrameTx` fixture may
-instead supply it as a shared keyed-nonce sequence. Selectors `0x80`-`0x84`, the nonce-key
-list/hash, recent roots, `MODE_POST_TX`, and all trace/diff/event values are copied from the
-host fixture; neither the library nor the cheatcode derives, orders, or verifies them.
-`sigHash`, by contrast, remains the canonical EIP-8141 signature hash, although a synthetic
-fixture must supply its value.
+`TXPARAM(0x01)` is the scalar EIP-8141 wire nonce. Recent roots, `MODE_POST_TX`, and all
+trace/diff/event values are copied from the host fixture; neither the library nor the
+cheatcode derives or verifies them. `sigHash`, by contrast, remains the canonical EIP-8141
+signature hash, although a synthetic fixture must supply its value.
 
 `sigData`/`sigDataSlice` read an ARBITRARY entry's raw bytes through native `SIGDATACOPY`
-(`0xb5`). Native secp256k1, P256, and toolkit-local ML-DSA-44 bytes are all inaccessible.
+(`0xb5`). Native secp256k1 and P256 bytes are inaccessible.
 
 `approve(scope, returnData)` passes the byte array's payload directly to `APPROVE`. Because
 `APPROVE` terminates like `RETURN`, a low-level caller receives exactly those raw bytes, not
@@ -87,7 +74,6 @@ These opcodes halt exceptionally — burning the frame's gas, not reverting — 
 
 - any of them without an active frame context,
 - an out-of-bounds frame or signature index,
-- `firstNonceKey` when the nonce-key list is empty,
 - an out-of-bounds recent-root reference,
 - `frameStatus` of the current or a later frame,
 - `sigSigner` of an ARBITRARY entry (no protocol signer exists),
@@ -106,8 +92,8 @@ yourself with the corresponding count wrapper first.
 `test/FrameTxLib.t.sol` runs every wrapper's positive path against the real opcodes through
 `FrameTxLibHarness`, compiled natively by the patched forge and executed under patched
 revm. The cheatcode copies its non-normative fixture fields without deriving or validating
-them. Targeted negative tests cover an empty nonce-key list; out-of-range recent-root,
-frame, signature, global trace, account-local event/storage, event, and topic indexes;
+them. Targeted negative tests cover out-of-range recent-root, frame, signature, global
+trace, account-local event/storage, event, and topic indexes;
 current-frame status; protocol-signature/ARBITRARY misuse; non-POST_TX mode; strict event-data
 bounds; and a representative `TXPARAM` call with no frame context. The suite does not claim
 to run every wrapper under every invalid context.

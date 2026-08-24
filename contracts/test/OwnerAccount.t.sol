@@ -43,14 +43,6 @@ contract OwnerAccountTest is AccountTestSuite {
         assertApprovesFrame(ACCOUNT, _ctx(OWNER), "owner should approve");
     }
 
-    function test_mldsaOwnerApproves() public {
-        IFrameVm.FrameTx memory ctx = _ctx(OWNER);
-        ctx.signatures[0] = mldsaSig(OWNER);
-        assertApprovesFrame(
-            ACCOUNT, ctx, "the generic owner policy must accept a native ML-DSA-44 identity"
-        );
-    }
-
     function test_strangerRefused() public {
         assertRefusesFrame(ACCOUNT, _ctx(STRANGER), "stranger must not approve");
     }

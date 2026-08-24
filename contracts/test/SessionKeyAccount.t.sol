@@ -158,13 +158,9 @@ contract SessionKeyAccountTest is AccountTestSuite {
         });
         IFrameVm.FrameTxSignature[] memory sigs = new IFrameVm.FrameTxSignature[](1);
         sigs[0] = secpSig(signer);
-        uint256[] memory nonceKeys = legacyNonceKeys();
         ctx = IFrameVm.FrameTx({
             sender: account,
             nonce: 0,
-            legacyNonce: 0,
-            nonceKeys: nonceKeys,
-            nonceKeysHash: LEGACY_NONCE_KEYS_HASH,
             stateGasLeft: 0,
             sigHash: bytes32(uint256(0xf00d)),
             maxCost: 0,
@@ -195,16 +191,6 @@ contract SessionKeyAccountTest is AccountTestSuite {
         );
     }
 
-    function test_mldsaSessionKeyOnAllowlistedCallApproves() public {
-        IFrameVm.FrameTx memory ctx = _ctx(SESSION, TOKEN, 0, _transfer());
-        ctx.signatures[0] = mldsaSig(SESSION);
-        assertApprovesFrame(
-            account,
-            ctx,
-            "a native ML-DSA-44 session-key identity must follow the same allowlist policy"
-        );
-    }
-
     /// The owner is unconditional: the same frame the session key is refused for
     /// below is fine when the owner signed it.
     function test_ownerBypassesTheAllowlist() public {
@@ -214,16 +200,6 @@ contract SessionKeyAccountTest is AccountTestSuite {
                 OWNER, OTHER_TOKEN, 1 ether, abi.encodeWithSelector(APPROVE_SEL, OWNER, uint256(1))
             ),
             "owner must approve regardless of the frame policy"
-        );
-    }
-
-    function test_mldsaOwnerBypassesTheAllowlist() public {
-        IFrameVm.FrameTx memory ctx = _ctx(
-            OWNER, OTHER_TOKEN, 1 ether, abi.encodeWithSelector(APPROVE_SEL, OWNER, uint256(1))
-        );
-        ctx.signatures[0] = mldsaSig(OWNER);
-        assertApprovesFrame(
-            account, ctx, "a native ML-DSA-44 owner identity must keep unconditional authority"
         );
     }
 

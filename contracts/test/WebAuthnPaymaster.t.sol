@@ -223,15 +223,6 @@ contract WebAuthnPaymasterTest is PaymasterTestSuite {
         );
     }
 
-    function test_nativeMLDSAEntryCannotMasqueradeAsWebAuthn() public {
-        _assertInvalid(
-            mldsaSig(address(0xA44)),
-            0,
-            0.5 ether,
-            "native ML-DSA-44 metadata is not a WebAuthn assertion"
-        );
-    }
-
     function test_explicitMessageArbitraryEntryIsRefused() public {
         _assertInvalid(
             _entry(SCHEME_ARBITRARY, keccak256("explicit"), _validAssertion()),

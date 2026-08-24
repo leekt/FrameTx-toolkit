@@ -8,7 +8,7 @@ import {Test} from "forge-std/Test.sol";
 /// They live in the patched Foundry (`leekt/foundry`) but are not yet in a
 /// published `forge-std`, so tests declare the interface against `vm`'s address.
 /// `setFrameTx` copies every value supplied by the test; it does not derive or
-/// validate the non-normative nonce-key, recent-root, POST_TX, or trace fields.
+/// validate the non-normative recent-root, POST_TX, or trace fields.
 interface IFrameVm {
     struct FrameTxFrame {
         /// Normative: 0 DEFAULT, 1 VERIFY, 2 SENDER. Fixture-only: 3 POST_TX.
@@ -32,7 +32,7 @@ interface IFrameVm {
     }
 
     struct FrameTxSignature {
-        /// 0 ARBITRARY, 1 SECP256K1, 2 P256, 3 ML-DSA-44.
+        /// 0 ARBITRARY, 1 SECP256K1, 2 P256; all other values are reserved.
         uint8 scheme;
         /// Host-supplied resolved signer. Ignored for ARBITRARY.
         address signer;
@@ -91,14 +91,8 @@ interface IFrameVm {
 
     struct FrameTx {
         address sender;
-        /// TXPARAM 0x01: baseline scalar wire nonce, or a fixture-supplied shared sequence.
+        /// TXPARAM 0x01: scalar wire nonce.
         uint64 nonce;
-        /// Host-supplied non-normative fixture selector TXPARAM 0x80.
-        uint64 legacyNonce;
-        /// Host-supplied non-normative fixture selector data for 0x81/0x84.
-        uint256[] nonceKeys;
-        /// Host-supplied non-normative fixture value for TXPARAM 0x82; not derived here.
-        bytes32 nonceKeysHash;
         /// State gas remaining in the current frame, TXPARAM 0x0C.
         uint64 stateGasLeft;
         /// Canonical EIP-8141 signature hash; supplied rather than derived by the cheatcode.
@@ -111,7 +105,7 @@ interface IFrameVm {
         uint64 frameIndex;
         FrameTxFrame[] frames;
         FrameTxSignature[] signatures;
-        /// Host-supplied non-normative fixture data for TXPARAM 0x83/B6.
+        /// Host-supplied non-normative fixture data for RECENTROOTREFLOAD (0xB6).
         FrameTxRecentRootReference[] recentRootReferences;
         /// Host-supplied non-normative fixture data for B7-B9.
         FrameTxTrace trace;
@@ -144,10 +138,6 @@ abstract contract FrameTest is Test {
     uint8 internal constant MODE_VERIFY = 1;
     uint8 internal constant MODE_SENDER = 2;
     uint8 internal constant MODE_POST_TX = 3;
-
-    /// Synthetic host-context hash for the fixture nonce-key list `[0]`.
-    bytes32 internal constant LEGACY_NONCE_KEYS_HASH =
-        0xada5013122d395ba3c54772283fb069b10426056ef8ca54750cb9bb552a59e7d;
 
     // Installs an account's compiled runtime from forge's own artifacts: the
     // frame contracts are compiled natively by the patched forge under the
@@ -189,18 +179,12 @@ abstract contract FrameTest is Test {
         trace.events = new IFrameVm.FrameTxEvent[](0);
     }
 
-    /// Synthetic fixture key list `[0]` used when modeling the baseline scalar nonce.
-    function legacyNonceKeys() internal pure returns (uint256[] memory keys) {
-        keys = new uint256[](1);
-    }
-
     /// A single-frame VERIFY context: the common shape for validating an account.
     function verifyContext(address account, uint64 approvableScopes, bytes32 sigHash)
         internal
         pure
         returns (IFrameVm.FrameTx memory)
     {
-        uint256[] memory nonceKeys = legacyNonceKeys();
         IFrameVm.FrameTxFrame[] memory frames = new IFrameVm.FrameTxFrame[](1);
         frames[0] = IFrameVm.FrameTxFrame({
             mode: MODE_VERIFY,
@@ -217,9 +201,6 @@ abstract contract FrameTest is Test {
         return IFrameVm.FrameTx({
             sender: account,
             nonce: 0,
-            legacyNonce: 0,
-            nonceKeys: nonceKeys,
-            nonceKeysHash: LEGACY_NONCE_KEYS_HASH,
             stateGasLeft: 0,
             sigHash: sigHash,
             maxCost: 0,
@@ -253,16 +234,6 @@ abstract contract FrameTest is Test {
         return
             IFrameVm.FrameTxSignature({
                 scheme: 2, signer: signer, msgHash: bytes32(0), signature: ""
-            });
-    }
-
-    /// Synthetic native ML-DSA-44 entry modeling the canonical-hash case.
-    /// The host fixture supplies already-verified signer metadata; raw native
-    /// signature bytes remain opaque to account bytecode.
-    function mldsaSig(address signer) internal pure returns (IFrameVm.FrameTxSignature memory) {
-        return
-            IFrameVm.FrameTxSignature({
-                scheme: 3, signer: signer, msgHash: bytes32(0), signature: ""
             });
     }
 

@@ -4,8 +4,7 @@ EIP-8141 is still a Draft with an open
 [`execution-specs` implementation tracker](https://github.com/ethereum/execution-specs/issues/2829)
 in the [Bogota milestone](https://github.com/ethereum/execution-specs/milestone/29). Treat this
 as a migration design and test plan, not a mainnet cutover runbook. The toolkit is a prototype:
-it has no public-pool propagation policy or production audit, and its local ML-DSA scheme is
-not part of upstream EIP-8141.
+it has no public-pool propagation policy, production audit, or ready post-quantum verifier.
 
 The safest migration keeps the old authorization path usable until the new path has survived
 realistic canaries and a rollback window.
@@ -41,7 +40,7 @@ Both adapters' test fixtures inherit the shared
 [`AccountTestSuite`](../contracts/test/AccountTestSuite.sol), which covers self-validation and
 payment (`BOTH`), validation under external sponsorship (`EXECUTION`), and payment for another
 sender (`PAYMENT`). The shared
-[`PaymasterTestSuite`](../contracts/test/PaymasterTestSuite.sol) also requires all four example
+[`PaymasterTestSuite`](../contracts/test/PaymasterTestSuite.sol) also requires every example
 paymasters to sponsor each migrated account. These are real contract/delegation and opcode
 tests under synthetic `setFrameTx` context; they do not turn the migration fixtures into a
 public-bundler or raw type-`0x06` end-to-end test.
@@ -217,7 +216,8 @@ Legacy transactions and Frame transactions share the account nonce, so wallets m
 pending queues and replacements across both formats. Test the first Frame transaction with a
 small value and a conservative gas limit before changing the wallet's default submission path.
 
-Default code is secp256k1-only. The toolkit-local ML-DSA scheme does not change that rule.
+Default code is secp256k1-only. A post-quantum design must use an `ARBITRARY` witness and
+compatible validation code; it cannot use the empty-code path.
 
 ## EOAs: optional EIP-7702 dual-mode delegation
 
@@ -262,7 +262,7 @@ The EOA fixture delegates the authority to `EOA7702FrameAccount` and proves:
   retains the EOA as caller, and a third party cannot use that executor;
 - Frame validation remains secp256k1-only, binds the signer to `address(this)`, and rejects a
   same-address P256 metadata collision instead of broadening the original EOA root;
-- the inherited account suite covers `BOTH`, `EXECUTION`, and `PAYMENT`, and all four example
+- the inherited account suite covers `BOTH`, `EXECUTION`, and `PAYMENT`, and all example
   paymasters sponsor the delegated EOA; and
 - a signed zero-address authorization clears the delegation without moving funds, restoring a
   plain EOA rollback state.

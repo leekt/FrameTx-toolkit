@@ -14,8 +14,7 @@ import {FrameTxLib} from "../frame/FrameTxLib.sol";
 /// `sender_approved` is already true. See `contracts/docs/06-paymaster.md`.
 ///
 /// The central idea: before any frame runs, the protocol has ALREADY verified
-/// every supported native signature against its selected message, including the
-/// toolkit-local ML-DSA-44 profile. This paymaster deliberately authorises only
+/// every supported native signature against its selected message. This paymaster deliberately authorises only
 /// secp256k1: it asks SIGPARAM which key signed, requires the canonical
 /// transaction-hash case, and decides whether it trusts that key.
 contract SponsoringPaymaster {

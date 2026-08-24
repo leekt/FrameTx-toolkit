@@ -10,12 +10,12 @@ recorded at exact commits in [VERSIONS.md](VERSIONS.md).
 > [!note] Reproducible current stack
 > The EIP-8141 stack is published on each fork's default branch: Solidity `develop` at
 > `4c6c547d9a35b23807f421692ac65c35f26f3d54`, revm `main` at
-> `3c82639a34a104af73d9aea0e9b50b005caace81`, foundry-core `main` at
+> `21ace0ade666d99f3e1c6e95ba173972164d0ceb`, foundry-core `main` at
 > `f415f6fef0a62f44c7faa83daa8e37b14f0e009b`, and Foundry `master` at
-> `6cfbfd4e76cb275e1974caebfbf3b88d13c70c37`. The real Kernel v3.3 migration fixture uses
+> `5683db7dc79cace93363fe3465e20792b859bec9`. The real Kernel v3.3 migration fixture uses
 > official ZeroDev Kernel commit `cd697c7e21715d015e0643af22310a99aa17433b`. Foundry
-> promotion passed 30/30 primitives, 44/44 Anvil unit, and 31/31 Anvil integration tests;
-> the contract project passes 324/324 tests across 19 suites. The root gitlinks pin these
+> promotion passed 27/27 primitives, 44/44 Anvil unit, and 30/30 Anvil integration tests;
+> the contract project passes 260/260 tests across 15 suites. The root gitlinks pin these
 > exact published commits, so a fresh recursive clone reproduces the stack. To inspect later
 > primary-branch movement without changing those pins, use
 > [the fetch-only submodule sync command](.claude/commands/sync-submodules.md).
@@ -65,8 +65,6 @@ the `setFrameTx` cheatcode. In this toolkit, `@future` executes as **Osaka**, th
 pre-Amsterdam Ethereum profile. That activates the [EIP-7951 P256VERIFY
 precompile](https://eips.ethereum.org/EIPS/eip-7951) at `0x100`, which the WebAuthn
 validators need, without enabling Amsterdam's incompatible node-level state-gas rules.
-The patched FrameTx host also enables this toolkit's explicitly non-normative native
-ML-DSA-44 scheme `0x03`; no EVM precompile or named-fork activation is implied.
 
 For real signed type-`0x06` envelopes, receipts, and state gas, run the patched node:
 
@@ -106,7 +104,7 @@ Prerequisites and the full build order live in [guides/01-build.md](guides/01-bu
 | [EIP-7997](https://forkcast.org/eips/7997) | Deterministic factory contract | [Glamsterdam](https://forkcast.org/upgrade/glamsterdam) | Scheduled (SFI) | Exact factory address/runtime already available in Anvil, plus the `Create2FactoryLib` Solidity helper; fork-gated activation and nonce `1` are not modeled |
 | [EIP-8141](https://eips.ethereum.org/EIPS/eip-8141) | Frame transactions | [Bogota milestone](https://github.com/ethereum/execution-specs/milestone/29) | Draft; [implementation tracker #2829](https://github.com/ethereum/execution-specs/issues/2829) open | Compiler, VM, and opt-in Anvil raw-RPC path aligned and tested against the pinned current master, including receipts, traces, and fork replay |
 | [EIP-7906](https://forkcast.org/eips/7906) | Transaction assertions via state-diff opcode | [Hegotá](https://forkcast.org/upgrade/hegota) | Proposed (PFI) | Host-supplied EVM fixture only; wire and trace construction not implemented |
-| [EIP-8250](https://forkcast.org/eips/8250) | Keyed nonces for frame transactions | [Hegotá](https://forkcast.org/upgrade/hegota) | Proposed (PFI) | Host-supplied context only; wire and state integration not implemented |
+| [EIP-8250](https://forkcast.org/eips/8250) | Keyed nonces for frame transactions | [Hegotá](https://forkcast.org/upgrade/hegota) | Proposed (PFI) | Not implemented; the toolkit exposes only EIP-8141's scalar nonce |
 | [EIP-8272](https://forkcast.org/eips/8272) | Recent roots for frame transactions | [Hegotá](https://forkcast.org/upgrade/hegota) | Proposed (PFI) | Host-supplied context only; wire and root verification not implemented |
 | [EIP-7819](https://forkcast.org/eips/7819) | `SETDELEGATE` instruction | [Hegotá](https://forkcast.org/upgrade/hegota) | Proposed (PFI) | Compiler, REVM, and explicit Anvil opt-in implemented with gas, collision, refund, clearing, nonce, and immediate-effect coverage |
 | [EIP-7851](https://forkcast.org/eips/7851) | Code-controlled EOA delegation | [Hegotá](https://forkcast.org/upgrade/hegota) | Proposed (PFI) | Compiler, REVM, and Ethereum-only Anvil opt-in implemented; upstream leaves the opcode TBD, so the toolkit explicitly uses non-normative `0xf7` |
@@ -117,11 +115,9 @@ EIP-8141's Draft status and open Bogota target are sourced from the official EIP
 2026-08-23; the remaining roadmap rows retain their Forkcast 2026-08-16 snapshot. The local
 [implementation document](spec/EIP8141.md) has a normative body matching pinned official
 master `f767a1e8078e17c9b381a91d35a09492189ede1b`, including the merged native
-`SIGDATACOPY` instruction, plus an explicitly non-normative ML-DSA-44 profile at
-upstream-reserved scheme `0x03`, and a clearly non-normative appendix for the context-only
-EIP-8250/8272/7906 tooling fixture. The
-local ML-DSA allocation is experimental and not portable to upstream clients; the appendix
-does not define transaction-wire semantics for those fixture extensions.
+`SIGDATACOPY` instruction, plus a clearly non-normative appendix for the context-only
+EIP-8250/8272/7906 tooling fixture. Signature schemes `0x03` through `0xff` remain reserved;
+the appendix does not define transaction-wire semantics for its fixture extensions.
 
 A fresh recursive clone checks out the exact current compiler, VM, and tooling commits. See
 [Building the toolkit](guides/01-build.md) for the required build order and reproducibility
@@ -134,9 +130,9 @@ contract calls that validate the transaction, approve gas payment, and execute t
 operations. Validity and gas payment become programmable.
 
 The consequence that matters for contract authors: **the protocol verifies native signatures
-before your code runs.** Every upstream `SECP256K1`/`P256` entry, and every toolkit-local
-ML-DSA-44 (`0x03`) entry, is checked against either the canonical transaction hash (empty
-`msg`) or its explicit digest before frame execution begins. A native-signature account does
+before your code runs.** Every `SECP256K1`/`P256` entry is checked against either the
+canonical transaction hash (empty `msg`) or its explicit digest before frame execution
+begins. A native-signature account does
 not repeat the cryptography; it asks which key identity signed, requires the canonical-hash
 case when authorizing frames, and applies policy. An
 `ARBITRARY` entry is different: the protocol checks its structure but leaves its witness for
@@ -151,7 +147,6 @@ single-owner validator is:
 
 ```solidity
 function validate(uint256 signatureIndex) external {
-    if (FrameTxLib.sigScheme(signatureIndex) == FrameTxLib.SCHEME_ARBITRARY) revert();
     if (!FrameTxLib.signedThisTx(signatureIndex)) revert();
     if (FrameTxLib.sigSigner(signatureIndex) != owner) revert();
 
@@ -163,22 +158,20 @@ function validate(uint256 signatureIndex) external {
 
 Deriving the current frame's allowed scope lets the same account validate and pay for
 itself (`BOTH`), validate while a paymaster supplies ETH (`EXECUTION`), or pay for another
-already-approved sender (`PAYMENT`). The standalone Yul account implements the same
-single-index ABI and treats empty calldata as its ETH-funding path. Every current paymaster
-likewise receives one routing index through `sponsorTransaction(uint256)` (selector
-`0x217de4d8`).
+already-approved sender (`PAYMENT`). Every current paymaster likewise receives one routing
+index through `sponsorTransaction(uint256)` (selector `0x217de4d8`).
 
-The ML-DSA profile is pure FIPS 204 ML-DSA-44 with an empty context over that existing
-32-byte message. Its native field is exactly `2,420-byte signature || 1,312-byte public key`,
-and its signer identity is `low20(keccak256(0x03 || publicKey))`. Upstream reserves `0x03`;
-the local verifier, 50,000-gas placeholder, audit warning, and dedicated contracts are in
-[`contracts/docs/10-pq.md`](contracts/docs/10-pq.md).
+Post-quantum schemes such as ML-DSA are not native signature schemes today. They must use an
+`ARBITRARY` witness and validation-frame or custom-verifier logic that binds the proof to the
+canonical signature hash. The toolkit currently ships no ML-DSA verifier, account, or
+paymaster; [`contracts/docs/10-pq.md`](contracts/docs/10-pq.md) documents the integration
+boundary and future pure-function direction.
 
 Empty-code default accounts remain secp256k1-only. A secp256k1 multisig owner can place its
 canonical entry at index 1, let the multisig count that entry for execution, and let a later
 default-code PAYMENT frame against the same codeless owner reuse it—one envelope entry and
-no second signature. An ML-DSA owner cannot use that default payer path without compatible
-account code or delegation.
+no second signature. An account using an `ARBITRARY` post-quantum witness cannot use that
+default payer path without compatible account code or delegation.
 
 ## Contents
 
@@ -189,7 +182,7 @@ account code or delegation.
 | [`foundry-core/`](foundry-core/) | Submodule — teaches Foundry's compiler layer the experimental `@future` EVM target |
 | [`foundry/`](foundry/) | Submodule — `forge` with the frame cheatcodes and opt-in Anvil transaction path |
 | [`contracts/vendor/kernel-v3.3/`](contracts/vendor/kernel-v3.3/) | Official ZeroDev Kernel v3.3 fixture submodule, pinned for real factory/proxy/ERC-4337 migration tests |
-| [`spec/EIP8141.md`](spec/EIP8141.md) | Current-master normative overlay, the local non-normative ML-DSA-44 scheme, and a non-normative tooling-fixture appendix |
+| [`spec/EIP8141.md`](spec/EIP8141.md) | Current-master normative overlay and a non-normative tooling-fixture appendix |
 | [`contracts/`](contracts/) | The Foundry project: accounts in `src/accounts`, policy in `src/policy`, EIP helper libraries in `src/eips`, **all tests** in `test/` |
 | [`guides/`](guides/) | Build, write, and what does not work yet |
 | [`tools/check-spec-drift.sh`](tools/check-spec-drift.sh) | Detect whether the spec moved |
@@ -219,8 +212,7 @@ REVM while the custom `setFrameTx` cheatcode supplies synthetic transaction cont
 account validation and approval behavior, but not type-`0x06` wire encoding, pool admission,
 nonce transitions, or eventual ETH charging and refunds. Native P256 fixtures supply
 already-verified scheme/signer/message metadata and therefore do not cryptographically verify
-the envelope signature; native ML-DSA contract fixtures have the same boundary. WebAuthn
-fixtures do construct a real assertion and execute
+the envelope signature. WebAuthn fixtures do construct a real assertion and execute
 P256VERIFY, although their canonical transaction challenge still comes from synthetic
 `setFrameTx` context.
 
@@ -252,8 +244,10 @@ To add an account:
    implement `accountUnderTest()` plus `accountAuthorizationSignatures()`. The inherited
    cases exercise self-payment, external
    sponsorship, paying for another sender, shifted signature routing, exact scopes, and ETH
-   funding. Add account-specific policy cases alongside them. If the policy trusts keys or
-   proof forms not enumerated by the positive signature hook, override
+   funding. The inherited negatives also show that out-of-range routing, wrong
+   secp256k1/P256 signatures, and a selected malformed `ARBITRARY` signature fail. Add
+   account-specific policy cases alongside them. If the policy trusts keys or proof forms not
+   enumerated by the positive signature hook, override
    `accountUnauthorizedSignatures()` with entries the policy is guaranteed to reject.
 3. Run the focused test:
 
@@ -264,11 +258,13 @@ To add an account:
 Paymaster implementations have the parallel
 [`contracts/test/PaymasterTestSuite.sol`](contracts/test/PaymasterTestSuite.sol). Its
 four hooks provide the deployed paymaster, one trusted signature, scalar index-selecting
-calldata, and accepted max cost; inherited cases require sponsorship of all ten account targets:
-`OwnerAccount`, `MultisigAccount`, `SessionKeyAccount` through its owner, the portable and
-builtin Yul accounts, `P256Account`, `WebAuthnAccount`, `MLDSAAccount`, the migrated Kernel
+calldata, and accepted max cost; inherited cases require sponsorship of all configured account targets:
+`OwnerAccount`, `MultisigAccount`, `SessionKeyAccount` through its owner, `P256Account`,
+`WebAuthnAccount`, the migrated Kernel
 v3.3 proxy, and the EIP-7702-delegated EOA. Every case uses one shared, shifted signature
-envelope. Sender-specific signature policies can override `_preparePaymasterForAccount(address)`;
+envelope, and inherited negatives show that wrong supported signatures plus a
+malformed selected `ARBITRARY` sponsor signature are refused. Sender-specific signature policies can override
+`_preparePaymasterForAccount(address)`;
 a paymaster without signature authorization needs a policy-specific suite.
 
 ### Full Anvil transactions
@@ -286,10 +282,9 @@ Use `--hardfork osaka` instead of `prague` when the validation path executes
 `WebAuthnAccount` or `WebAuthnPaymaster`; both call the EIP-7951 precompile at `0x100`.
 The Anvil suite includes a raw native-P256 transaction that rejects a corrupted public key,
 then mines the valid type-`0x06` envelope through `P256Account` and checks its payer, nonce,
-and SENDER-frame effects. It also submits a real 3,732-byte ML-DSA-44 entry through the
-production `MLDSAAccount`, rejects a corrupt signature at admission, and checks payer debit,
-nonce, and SENDER effects. A second raw case proves the multisig-owner/index-1 default-payer
-reuse path. There is currently no equivalent Anvil WebAuthn end-to-end test.
+and SENDER-frame effects. A second raw case proves the multisig-owner/index-1 default-payer
+reuse path. There is currently no Anvil WebAuthn end-to-end test, and no ML-DSA verifier or
+transaction path is shipped.
 
 Anvil accepts frame transactions only as signed raw bytes through `eth_sendRawTransaction`.
 Object-form `eth_sendTransaction` and `eth_call` do not construct them, and `cast send` does
@@ -328,25 +323,23 @@ All under [`contracts/src/accounts`](contracts/src/accounts), each with notes in
 
 | Contract | Kind | Demonstrates |
 |---|---|---|
-| `account.yul` / `account-builtins.yul` | Account | The same minimal one-index owner account, emitted through portable `verbatim` or patched builtins |
 | `OwnerAccount.sol` | Account | The canonical single-owner starting point |
 | `MultisigAccount.sol` | Account | k-of-n over protocol-verified signatures, with no signature parsing |
 | `SessionKeyAccount.sol` | Account | Cross-frame constraints for a delegated key, with expiry via the expiry verifier frame |
 | `P256Account.sol` | Account | Native protocol-verified P256 metadata, `keccak256(qx || qy)[12:]` signer identity, and self-call key rotation |
 | `WebAuthnAccount.sol` | Account | A strict WebAuthn assertion carried as an `ARBITRARY` witness and verified at precompile `0x100` |
-| `MLDSAAccount.sol` | Account | Exact toolkit-local native ML-DSA-44 scheme `0x03`, domain-separated signer identity, and self-call key rotation |
 | [`KernelV33FrameAccount.sol`](contracts/src/accounts/KernelV33FrameAccount.sol) | Migration adapter | A 1,014-byte, storage-free compatibility shim for an unhooked Kernel v3.3 ECDSA root; it adds Frame validation and delegates the complete legacy surface to the exact prior implementation |
 | [`EOA7702FrameAccount.sol`](contracts/src/accounts/EOA7702FrameAccount.sol) | Migration adapter | Same-address EIP-7702 delegation with secp256k1-only Frame approval and a self-only legacy execution path |
 | `SponsoringPaymaster.sol` | Paymaster | Third-party sponsorship authorized by a protocol-verified secp256k1 signer |
 | `P256Paymaster.sol` | Paymaster | Third-party sponsorship authorized by a protocol-verified native P256 signer |
 | `WebAuthnPaymaster.sol` | Paymaster | Third-party sponsorship authorized by a strict WebAuthn assertion |
-| `MLDSAPaymaster.sol` | Paymaster | Third-party sponsorship authorized by the exact toolkit-local native ML-DSA-44 scheme |
 
 [`contracts/docs/09-p256-and-webauthn.md`](contracts/docs/09-p256-and-webauthn.md)
 documents the two P256 paths, their APIs, exact WebAuthn witness profile, public-mempool
-status, and test boundaries. [`contracts/docs/10-pq.md`](contracts/docs/10-pq.md) documents
-the non-normative ML-DSA wire, gas, contracts, generic native-policy support, key lifecycle,
-and audit boundary. `contracts/docs/01-eoa-default-code.md` covers the no-contract EOA path.
+status, and test boundaries. [`contracts/docs/10-pq.md`](contracts/docs/10-pq.md) explains
+how a future post-quantum verifier would use `ARBITRARY` witness bytes and records that no
+ML-DSA verifier, account, or paymaster is currently shipped. `contracts/docs/01-eoa-default-code.md`
+covers the no-contract EOA path.
 The production adapters and real factory/delegation tests are indexed in
 [the migration guide](guides/05-migration.md#executable-migration-examples).
 
@@ -383,7 +376,7 @@ tools/check-spec-drift.sh
 
 Fetches the exact upstream source pin and current `ethereum/EIPs` master, then exits
 non-zero and prints their diff if upstream moved. It deliberately does not compare the
-local explanatory notes, experimental ML-DSA-44 scheme, or tooling appendix to upstream as
+local explanatory notes or the tooling appendix to upstream as
 though they should be identical.
 [VERSIONS.md](VERSIONS.md) maps each spec area to the code implementing it, so you can go
 straight to what a given change affects.
@@ -397,7 +390,8 @@ default branches (`develop`, `main`, `main`, and `master`, respectively) for Sol
 foundry-core, and Foundry contain the pinned stack and reproduce from a fresh recursive clone.
 Keyed-nonce/recent-root/POST_TX
 wire and state integration, public-pool policy, gossip, and Amsterdam state-gas compatibility
-are not implemented. Toolkit-local ML-DSA-44 uses an upstream-reserved scheme value and is
-experimental and unaudited. Experimental EIP-7819, EIP-7851, and EIP-8151 compiler/VM and opt-in
+are not implemented. ML-DSA is not a native scheme and no ready verifier is shipped;
+experiments must use `ARBITRARY` witness bytes and validation code. Experimental EIP-7819,
+EIP-7851, and EIP-8151 compiler/VM and opt-in
 Anvil support is also present. Non-Ethereum execution profiles reject frame envelopes and mask
 the Ethereum-only proposal flags. Not independently audited; not for production.

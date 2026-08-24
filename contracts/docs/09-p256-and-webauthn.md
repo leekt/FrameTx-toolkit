@@ -14,10 +14,10 @@ boundaries:
 The native path is the simpler policy primitive. WebAuthn needs the `ARBITRARY` path because
 an authenticator signs `authenticatorData || SHA-256(clientDataJSON)`, not the EIP-8141
 transaction hash directly. Its client-data challenge carries that transaction hash instead.
-The toolkit-local ML-DSA-44 scheme `0x03` does not widen either path:
 `P256Account`/`P256Paymaster` still require exactly scheme `0x02`, while
 `WebAuthnAccount`/`WebAuthnPaymaster` still require exactly their scheme-`0x00` assertion
-profile. The separate post-quantum profile is documented in [`10-pq.md`](10-pq.md).
+profile. Post-quantum experiments likewise need `ARBITRARY` witness validation; see
+[`10-pq.md`](10-pq.md).
 See the local [EIP-8141 implementation profile](../../spec/EIP8141.md) and the primary
 [EIP-8141](https://eips.ethereum.org/EIPS/eip-8141),
 [EIP-7951](https://eips.ethereum.org/EIPS/eip-7951), and
@@ -268,7 +268,7 @@ is used as a separate pay target, it is a non-canonical paymaster. Under the cur
 is subject to the one-pending-transaction limit for that payer and to every generic
 validation trace, opcode, gas, balance-reservation, and structural rule. The dedicated
 `P256Paymaster` and `WebAuthnPaymaster` have the same non-canonical classification, as does
-the separate experimental `MLDSAPaymaster`.
+any future post-quantum paymaster.
 
 `P256Account` is stricter: its pay-other validation reads `p256Signer` from storage outside
 the different `tx.sender`, which violates the public-pool trace rule. That role is still valid
@@ -280,22 +280,18 @@ for direct execution or private inclusion.
 checks the three roles above, shifted selected indices, unselected-proof rejection, exact
 scope behavior, invalid selections, and ordinary ETH funding.
 
-[`PaymasterTestSuite.sol`](../test/PaymasterTestSuite.sol) is inherited by all four example
-paymaster tests: `SponsoringPaymasterTest`, `P256PaymasterTest`,
-`WebAuthnPaymasterTest`, and `MLDSAPaymasterTest`. Each paymaster must sponsor the same
-ten-account matrix from a
+[`PaymasterTestSuite.sol`](../test/PaymasterTestSuite.sol) is inherited by all three example
+paymaster tests: `SponsoringPaymasterTest`, `P256PaymasterTest`, and
+`WebAuthnPaymasterTest`. Each paymaster must sponsor the same account matrix from a
 shared signature envelope:
 
 1. `OwnerAccount`
 2. `MultisigAccount`
 3. `SessionKeyAccount` through its owner path
-4. Portable-verbatim Yul account
-5. Patched-builtin Yul account
-6. `P256Account`
-7. `WebAuthnAccount`
-8. `MLDSAAccount`
-9. Migrated Kernel v3.3 proxy
-10. EIP-7702-delegated EOA
+4. `P256Account`
+5. `WebAuthnAccount`
+6. Migrated Kernel v3.3 proxy
+7. EIP-7702-delegated EOA
 
 The matrix appends the paymaster's single authorization entry after the account-specific
 prefix, computes its shifted scalar index dynamically, and includes a wrong-selected-index
@@ -310,9 +306,6 @@ Consequently:
 - native P256 tests supply already-verified `scheme`, `signer`, and `msg` metadata with no
   raw protocol signature, so they test account/paymaster routing and policy rather than
   protocol P256 cryptography;
-- native ML-DSA contract tests have the same metadata-only boundary; real ML-DSA-44
-  cryptography and canonical 3,732-byte decoding are covered in the Rust transaction tests,
-  not by `setFrameTx`;
 - WebAuthn tests use `vm.signP256` to create a real assertion and exercise P256VERIFY at
   `0x100`, but the challenge is a synthetic fixture hash rather than a hash decoded from a
   raw type-`0x06` transaction;
@@ -322,9 +315,9 @@ Consequently:
 
 The separate Anvil integration suite closes that boundary for native P256: it submits a raw
 type-`0x06` envelope through the production `P256Account` runtime, rejects a corrupted public
-key at admission, and checks the mined payer, nonce, and SENDER-frame effect. The separate
-ML-DSA profile likewise has a raw production-account test; WebAuthn remains the path without
-a claimed Anvil end-to-end test.
+key at admission, and checks the mined payer, nonce, and SENDER-frame effect. WebAuthn
+remains without a claimed Anvil end-to-end test; no ML-DSA verifier or transaction path is
+shipped.
 
 ## Runtime profile
 

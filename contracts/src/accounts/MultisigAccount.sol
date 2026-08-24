@@ -48,14 +48,13 @@ contract MultisigAccount is IMultisigFrameAccount {
             uint256 sigIndex = signatureIndices[i];
             // Read the scheme BEFORE the signer: asking for resolved_signer of an ARBITRARY
             // entry is an exceptional halt, not a revert, so it would burn the frame's gas
-            // and invalidate the whole transaction. Native secp256k1, P256, and ML-DSA-44
-            // entries all expose a protocol-verified address identity. Unknown and
+            // and invalidate the whole transaction. Native secp256k1 and P256
+            // entries expose a protocol-verified address identity. Unknown and
             // contract-interpreted entries are skipped.
             uint256 scheme = FrameTxLib.sigScheme(sigIndex);
-            if (
-                scheme != FrameTxLib.SCHEME_SECP256K1 && scheme != FrameTxLib.SCHEME_P256
-                    && scheme != FrameTxLib.SCHEME_ML_DSA_44
-            ) continue;
+            if (scheme != FrameTxLib.SCHEME_SECP256K1 && scheme != FrameTxLib.SCHEME_P256) {
+                continue;
+            }
 
             // `signedThisTx` is `sigMsg(sigIndex) == 0`: signed over compute_sig_hash(tx), i.e. over
             // THIS transaction: its chain id, nonce, sender and every frame. A non-zero msg

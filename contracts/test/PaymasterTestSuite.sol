@@ -30,8 +30,6 @@ import {ValidatorLib} from "kernel-v3.3/utils/ValidationTypeLib.sol";
 /// tests. `approvableScopes` pins the only scope that may succeed in each call,
 /// but the Foundry frame fixture does not prove an ETH debit or balance transfer.
 abstract contract PaymasterTestSuite is FrameTest {
-    address private constant DEFAULT_PORTABLE_YUL_ACCOUNT = address(0xA110);
-    address private constant DEFAULT_BUILTIN_YUL_ACCOUNT = address(0xA111);
     address private constant DEFAULT_SENDER_TARGET = address(0x7043);
     address private constant KERNEL_V33_ENTRY_POINT = address(0x4337);
     bytes32 private constant PAYMASTER_SUITE_SIG_HASH = bytes32(uint256(0xf00d));
@@ -65,26 +63,8 @@ abstract contract PaymasterTestSuite is FrameTest {
         uint256 accountSignatureIndex;
     }
 
-    // Fresh runtimes for contracts/src/accounts/account.yul and
-    // contracts/src/accounts/account-builtins.yul, respectively. Both expose
-    // validate(uint256) and read their selected index from calldata.
-    bytes private constant PORTABLE_YUL_RUNTIME =
-        hex"36600557005b602436146010575f5ffd5b63ce4d01a35f3560e01c146022575f5ffd5b6004355f81b4600282b415600ab0600681b380603c575f5ffd5b82845f54141615604b57805f5faa5b5f5ffd";
-    bytes private constant BUILTIN_YUL_RUNTIME =
-        hex"3615604b576024360360475763ce4d01a35f3560e01c0360435760043560025f82b491b4156006600ab0b3918215603f575f541416603b575f80fd5b5f80aa5b5f80fd5b5f80fd5b5f80fd5b00";
-
     /// The deployed paymaster under test.
     function _paymasterUnderTest() internal view virtual returns (address);
-
-    /// Override these if the paymaster under test reserves one of the default
-    /// fixture addresses.
-    function _paymasterSuitePortableYulAccount() internal view virtual returns (address) {
-        return DEFAULT_PORTABLE_YUL_ACCOUNT;
-    }
-
-    function _paymasterSuiteBuiltinYulAccount() internal view virtual returns (address) {
-        return DEFAULT_BUILTIN_YUL_ACCOUNT;
-    }
 
     function _paymasterSuiteSenderTarget() internal view virtual returns (address) {
         return DEFAULT_SENDER_TARGET;
@@ -203,13 +183,9 @@ abstract contract PaymasterTestSuite is FrameTest {
             stateGasUsed: 0
         });
 
-        uint256[] memory nonceKeys = legacyNonceKeys();
         ctx = IFrameVm.FrameTx({
             sender: accountCase.account,
             nonce: 0,
-            legacyNonce: 0,
-            nonceKeys: nonceKeys,
-            nonceKeysHash: LEGACY_NONCE_KEYS_HASH,
             stateGasLeft: 0,
             sigHash: PAYMASTER_SUITE_SIG_HASH,
             maxCost: _paymasterTestMaxCost(),
@@ -371,48 +347,6 @@ abstract contract PaymasterTestSuite is FrameTest {
         });
     }
 
-    function _mldsaPublicKey(uint256 seed) private pure returns (bytes memory key) {
-        key = new bytes(1_312);
-        for (uint256 i; i < key.length; ++i) {
-            key[i] = bytes1(uint8((seed + i) & 0xff));
-        }
-    }
-
-    function _mldsaSigner(bytes memory publicKey) private pure returns (address) {
-        return address(uint160(uint256(keccak256(abi.encodePacked(bytes1(0x03), publicKey)))));
-    }
-
-    function _mldsaAccountCase() private returns (SponsoredAccountCase memory accountCase) {
-        address paymasterSigner = _paymasterTestSignature().signer;
-
-        uint256 trustedSeed = 0x44;
-        bytes memory trustedKey = _mldsaPublicKey(trustedSeed);
-        address trustedSigner = _mldsaSigner(trustedKey);
-        while (trustedSigner == paymasterSigner) {
-            trustedKey = _mldsaPublicKey(++trustedSeed);
-            trustedSigner = _mldsaSigner(trustedKey);
-        }
-
-        uint256 otherSeed = 0xa5;
-        bytes memory otherKey = _mldsaPublicKey(otherSeed);
-        address otherSigner = _mldsaSigner(otherKey);
-        while (otherSigner == trustedSigner || otherSigner == paymasterSigner) {
-            otherKey = _mldsaPublicKey(++otherSeed);
-            otherSigner = _mldsaSigner(otherKey);
-        }
-
-        address account = deployAccountWithArgs("MLDSAAccount", abi.encode(trustedKey));
-        IFrameVm.FrameTxSignature[] memory prefix = new IFrameVm.FrameTxSignature[](2);
-        prefix[0] = mldsaSig(otherSigner);
-        prefix[1] = mldsaSig(trustedSigner);
-        accountCase = SponsoredAccountCase({
-            account: account,
-            signaturePrefix: prefix,
-            accountCallData: _singleAccountCall(1),
-            accountSignatureIndex: 1
-        });
-    }
-
     function _kernelV33AccountCase() private returns (SponsoredAccountCase memory accountCase) {
         address rootValidator = deployAccountWithArgs("ECDSAValidator", bytes(""));
         address legacyImplementation =
@@ -459,11 +393,6 @@ abstract contract PaymasterTestSuite is FrameTest {
         });
     }
 
-    function _installYulAccount(address account, bytes memory runtime) private {
-        vm.etch(account, runtime);
-        vm.store(account, bytes32(0), bytes32(uint256(uint160(_suiteOwnerA()))));
-    }
-
     function test_paymasterConformance_sponsorsOwnerAccount() public {
         SponsoredAccountCase memory accountCase = _ownerAccountCase();
         _preparePaymasterForAccount(accountCase.account);
@@ -494,32 +423,6 @@ abstract contract PaymasterTestSuite is FrameTest {
         );
     }
 
-    function test_paymasterConformance_sponsorsPortableYulAccount() public {
-        address account = _paymasterSuitePortableYulAccount();
-        _installYulAccount(account, PORTABLE_YUL_RUNTIME);
-        _preparePaymasterForAccount(account);
-        SponsoredAccountCase memory accountCase =
-            _defaultAccountCase(account, _singleAccountCall(1));
-        _assertAccountThenPaymasterApprove(
-            _sponsoredContext(accountCase),
-            "portable Yul account must approve execution from shifted signature index 1",
-            "paymaster must sponsor the portable Yul account from shifted index 3"
-        );
-    }
-
-    function test_paymasterConformance_sponsorsBuiltinYulAccount() public {
-        address account = _paymasterSuiteBuiltinYulAccount();
-        _installYulAccount(account, BUILTIN_YUL_RUNTIME);
-        _preparePaymasterForAccount(account);
-        SponsoredAccountCase memory accountCase =
-            _defaultAccountCase(account, _singleAccountCall(1));
-        _assertAccountThenPaymasterApprove(
-            _sponsoredContext(accountCase),
-            "builtin Yul account must approve execution from shifted signature index 1",
-            "paymaster must sponsor the builtin Yul account from shifted index 3"
-        );
-    }
-
     function test_paymasterConformance_sponsorsP256Account() public {
         SponsoredAccountCase memory accountCase = _p256AccountCase();
         _preparePaymasterForAccount(accountCase.account);
@@ -537,16 +440,6 @@ abstract contract PaymasterTestSuite is FrameTest {
             _sponsoredContext(accountCase),
             "WebAuthn account must approve execution from configured credential at index 1",
             "paymaster must sponsor the WebAuthn account from shifted index 2"
-        );
-    }
-
-    function test_paymasterConformance_sponsorsMLDSAAccount() public {
-        SponsoredAccountCase memory accountCase = _mldsaAccountCase();
-        _preparePaymasterForAccount(accountCase.account);
-        _assertAccountThenPaymasterApprove(
-            _sponsoredContext(accountCase),
-            "ML-DSA-44 account must approve execution from native scheme-3 index 1",
-            "paymaster must sponsor the ML-DSA-44 account from shifted index 2"
         );
     }
 
@@ -594,5 +487,61 @@ abstract contract PaymasterTestSuite is FrameTest {
             ctx,
             "paymaster must not treat the account-selected signature as its authorisation"
         );
+    }
+
+    /// The shared paymaster route must fail closed when the selected sponsor
+    /// entry is an ARBITRARY signature with a malformed policy witness. Native
+    /// paymasters reject the scheme; WebAuthn rejects the malformed assertion.
+    function test_paymasterConformance_rejectsMalformedArbitrarySignature() public {
+        SponsoredAccountCase memory accountCase = _ownerAccountCase();
+        _preparePaymasterForAccount(accountCase.account);
+        IFrameVm.FrameTx memory ctx = _sponsoredContext(accountCase);
+        uint256 paymasterSignatureIndex = ctx.signatures.length - 1;
+        ctx.signatures[paymasterSignatureIndex] = arbitrarySig(hex"deadbeef");
+        ctx.frames[0].status = 1;
+        ctx.frameIndex = 1;
+        ctx.approvableScopes = SCOPE_PAYMENT;
+
+        assertRefusesFrame(
+            _paymasterUnderTest(),
+            ctx,
+            "a malformed ARBITRARY signature must not authorize sponsorship"
+        );
+    }
+
+    /// Native raw bytes are verified before this opcode-level fixture runs.
+    /// Exercise the contract-visible failure mode for each native scheme by
+    /// routing a protocol-resolved identity that is not the configured sponsor.
+    function test_paymasterConformance_rejectsWrongSecp256k1Signature() public {
+        _assertWrongNativeSignatureIsRefused(
+            1, "a wrong secp256k1 signature must not authorize sponsorship"
+        );
+    }
+
+    function test_paymasterConformance_rejectsWrongP256Signature() public {
+        _assertWrongNativeSignatureIsRefused(
+            2, "a wrong P256 signature must not authorize sponsorship"
+        );
+    }
+
+    function _assertWrongNativeSignatureIsRefused(uint8 scheme, string memory reason) private {
+        SponsoredAccountCase memory accountCase = _ownerAccountCase();
+        _preparePaymasterForAccount(accountCase.account);
+        IFrameVm.FrameTx memory ctx = _sponsoredContext(accountCase);
+        uint256 paymasterSignatureIndex = ctx.signatures.length - 1;
+        address stranger = _differentFromPaymaster(uint160(0xBAD100 + scheme));
+
+        if (scheme == 1) {
+            ctx.signatures[paymasterSignatureIndex] = secpSig(stranger);
+        } else if (scheme == 2) {
+            ctx.signatures[paymasterSignatureIndex] = p256Sig(stranger);
+        } else {
+            revert("unsupported native test scheme");
+        }
+
+        ctx.frames[0].status = 1;
+        ctx.frameIndex = 1;
+        ctx.approvableScopes = SCOPE_PAYMENT;
+        assertRefusesFrame(_paymasterUnderTest(), ctx, reason);
     }
 }

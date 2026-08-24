@@ -16,11 +16,6 @@ interface IHarness {
     function frameCount() external view returns (uint256);
     function currentFrameIndex() external view returns (uint256);
     function signatureCount() external view returns (uint256);
-    function legacyNonce() external view returns (uint256);
-    function nonceKeyCount() external view returns (uint256);
-    function nonceKeysHash() external view returns (bytes32);
-    function recentRootReferenceCount() external view returns (uint256);
-    function firstNonceKey() external view returns (uint256);
     function recentRootSourceId(uint256 i) external view returns (bytes32);
     function recentRootSlot(uint256 i) external view returns (uint256);
     function recentRoot(uint256 i) external view returns (bytes32);
@@ -114,9 +109,6 @@ contract FrameTxLibTest is FrameTest {
     address constant SIGNER = address(0x0BEEF);
     bytes32 constant SIG_HASH = keccak256("sig hash");
     bytes32 constant OTHER_MSG = keccak256("some other digest");
-    bytes32 constant NONCE_KEYS_HASH =
-        0x12164bf9476413f64229734534ebb103701111099e71b229191a85aacab75697;
-
     address constant TRACE_ACCOUNT_A = address(0x1000);
     address constant TRACE_ACCOUNT_B = address(0x2000);
     address constant TRACE_DEPLOYED = address(0x3000);
@@ -194,7 +186,7 @@ contract FrameTxLibTest is FrameTest {
     }
 
     /// Two frames -- frame 0 already succeeded and frame 1 is the current
-    /// fixture-only POST_TX frame -- plus host-supplied nonce keys, recent roots,
+    /// fixture-only POST_TX frame -- plus host-supplied recent roots,
     /// signatures, ordered state diffs, deployments and globally ordered events.
     function _ctx() internal pure returns (IFrameVm.FrameTx memory ctx) {
         IFrameVm.FrameTxFrame[] memory frames = new IFrameVm.FrameTxFrame[](2);
@@ -232,10 +224,6 @@ contract FrameTxLibTest is FrameTest {
             scheme: 0, signer: address(0), msgHash: OTHER_MSG, signature: ARB_SIG
         });
 
-        uint256[] memory nonceKeys = new uint256[](2);
-        nonceKeys[0] = 0xB0B;
-        nonceKeys[1] = 0xA11CE;
-
         IFrameVm.FrameTxRecentRootReference[] memory recentRoots =
             new IFrameVm.FrameTxRecentRootReference[](2);
         recentRoots[0] = IFrameVm.FrameTxRecentRootReference({
@@ -247,9 +235,6 @@ contract FrameTxLibTest is FrameTest {
 
         ctx.sender = address(0xACC0);
         ctx.nonce = 7;
-        ctx.legacyNonce = 11;
-        ctx.nonceKeys = nonceKeys;
-        ctx.nonceKeysHash = NONCE_KEYS_HASH;
         ctx.stateGasLeft = 25_000;
         ctx.sigHash = SIG_HASH;
         ctx.maxCost = 1 ether;
@@ -290,11 +275,6 @@ contract FrameTxLibTest is FrameTest {
         assertEq(h.currentFrameIndex(), 1, "currentFrameIndex");
         assertEq(h.signatureCount(), 2, "signatureCount");
         assertEq(h.stateGasLeft(), 25_000, "stateGasLeft");
-        assertEq(h.legacyNonce(), 11, "legacyNonce");
-        assertEq(h.nonceKeyCount(), 2, "nonceKeyCount");
-        assertEq(h.nonceKeysHash(), NONCE_KEYS_HASH, "nonceKeysHash");
-        assertEq(h.recentRootReferenceCount(), 2, "recentRootReferenceCount");
-        assertEq(h.firstNonceKey(), 0xB0B, "firstNonceKey");
     }
 
     function test_recentRootReferences() public inFrame {
@@ -443,16 +423,6 @@ contract FrameTxLibTest is FrameTest {
         _assertHarnessCallFails(
             abi.encodeCall(IHarness.recentRoot, (2)), "recent-root index past the end must fail"
         );
-    }
-
-    function test_emptyNonceKeyListHalts() public {
-        IFrameVm.FrameTx memory ctx = _ctx();
-        ctx.nonceKeys = new uint256[](0);
-        fvm.setFrameTx(ctx);
-        _assertHarnessCallFails(
-            abi.encodeCall(IHarness.firstNonceKey, ()), "first nonce key of an empty list must fail"
-        );
-        fvm.clearFrameTx();
     }
 
     function test_outOfRangeFrameAndSignatureIndexesHalt() public inFrame {

@@ -26,9 +26,9 @@ its `pay` frame runs it:
 5. Calls `FrameTxLib.approve(FrameTxLib.SCOPE_PAYMENT)`, PAYMENT scope only.
 
 **It does not run `ecrecover`.** The protocol verifies every supported native entry against
-its selected message *before any frame executes*: upstream `SECP256K1`/`P256`, plus this
-toolkit's experimental ML-DSA-44 scheme `0x03`. A frame that reaches `SIGPARAM` is therefore
-looking at metadata that is already proven. This particular contract still requires
+its selected message *before any frame executes*: `SECP256K1` and `P256`. A frame that
+reaches `SIGPARAM` is therefore looking at metadata that is already proven. This particular
+contract still requires
 `SECP256K1`; it decides **whether it trusts that key and whether the selected message is the
 canonical transaction hash** without repeating the cryptography.
 
@@ -70,7 +70,7 @@ is `0x217de4d8` + `0x00…01`.
 
 Both pieces of routing are authenticated. The account index (or multisig index array) and
 the paymaster's `sigIndex` are frame calldata, hence part of the frame list covered by every
-canonical transaction signature. All four current paymasters use the same
+canonical transaction signature. All three current paymasters use the same
 `sponsorTransaction(uint256)` ABI and selector `0x217de4d8`.
 
 The algorithm-specific alternatives keep their checks exact:
@@ -78,11 +78,9 @@ The algorithm-specific alternatives keep their checks exact:
 - [`P256Paymaster`](09-p256-and-webauthn.md#p256paymaster) requires native `P256` scheme
   `0x02`;
 - [`WebAuthnPaymaster`](09-p256-and-webauthn.md#webauthnpaymaster) requires its exact
-  contract-verified `ARBITRARY` assertion profile; and
-- [`MLDSAPaymaster`](10-pq.md#dedicated-paymaster) requires the toolkit-local native
-  ML-DSA-44 scheme `0x03`.
+  contract-verified `ARBITRARY` assertion profile.
 
-None widens another paymaster's accepted algorithm merely because all four expose the same
+None widens another paymaster's accepted algorithm merely because all three expose the same
 scalar routing ABI.
 
 ### Ordering requirement — the `pay` frame MUST come after `only_verify`
@@ -212,18 +210,16 @@ entry. A proof-only or allowlist-only paymaster needs a policy-specific suite in
 pretending to supply an empty index set. The optional preparation hook defaults to a no-op.
 
 The suite builds one shared, shifted signature envelope and requires the paymaster to sponsor
-`OwnerAccount`, `MultisigAccount`, `SessionKeyAccount` through its owner path, the portable
-Yul account, the builtin Yul account, `P256Account`, `WebAuthnAccount`, `MLDSAAccount`, the
+`OwnerAccount`, `MultisigAccount`, `SessionKeyAccount` through its owner path,
+`P256Account`, `WebAuthnAccount`, the
 migrated Kernel v3.3 proxy, and the EIP-7702-delegated EOA. It also proves that routing the
 paymaster to an account's selected entry is refused. Each fixture invokes
 the account's `EXECUTION` path and then the paymaster's
 `PAYMENT` path with independently installed synthetic context; `sender_approved` does not
 persist between those calls.
 
-`SponsoringPaymasterTest`, `P256PaymasterTest`, `WebAuthnPaymasterTest`, and
-`MLDSAPaymasterTest` all inherit this ten-account matrix. ML-DSA entries in the Solidity
-suite are already-verified metadata fixtures; the native Rust transaction tests, not this
-contract suite, exercise the 3,732-byte cryptographic wire.
+`SponsoringPaymasterTest`, `P256PaymasterTest`, and `WebAuthnPaymasterTest` all inherit this
+matrix.
 
 These are opcode-level conformance tests: they prove the correct approval path and scope,
 not the eventual ETH debit or refund. Transaction-level accounting belongs in the Anvil
@@ -249,8 +245,8 @@ raw-transaction suite.
   this example returns empty (`approvetx(0, 0, 1)`). A `post_op` frame could in principle
   want data from it, but there is no defined channel — `FRAMEDATA*` reads a frame's *input*
   `data`, not its output.
-- `P256` (`0x2`) and toolkit-local `ML_DSA_44` (`0x3`) signatures also carry a
-  protocol-verified resolved signer. This example nevertheless restricts its policy to
+- `P256` (`0x2`) signatures also carry a protocol-verified resolved signer. This example
+  nevertheless restricts its policy to
   `SECP256K1`; use the dedicated paymaster for an exact alternative rather than silently
   widening a deployed sponsor policy. In every case, keep the `msg == 0` check — that one is
   load-bearing.

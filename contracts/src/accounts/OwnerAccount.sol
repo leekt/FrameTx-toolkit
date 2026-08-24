@@ -8,9 +8,9 @@ import {IFrameAccount} from "./IFrameAccount.sol";
 /// @author taek <leekt216@gmail.com>
 /// @notice The canonical single-owner EIP-8141 smart account.
 /// @dev    The account does NOT verify a signature. Before frame 0, the protocol
-///         verified every native entry (SECP256K1, P256, or the toolkit-local
-///         ML-DSA-44 scheme) against either the canonical transaction hash or its
-///         explicit digest. Signed VERIFY-frame calldata selects the signature
+///         verified every native entry (SECP256K1 or P256) against either the
+///         canonical transaction hash or its explicit digest. Signed VERIFY-frame
+///         calldata selects the signature
 ///         entry this account should inspect; that entry must come from the owner
 ///         over this transaction.
 contract OwnerAccount is IFrameAccount {
@@ -36,16 +36,11 @@ contract OwnerAccount is IFrameAccount {
     ///         transaction (and unrolls any APPROVE), so a revert is the
     ///         rejection path -- there is no "return false".
     function validate(uint256 signatureIndex) external override {
-        // ARBITRARY entries have no resolved signer, so asking SIGPARAM for one
-        // would halt exceptionally. Every supported native scheme has a
-        // protocol-verified resolved signer and is acceptable here.
-        if (FrameTxLib.sigScheme(signatureIndex) == FrameTxLib.SCHEME_ARBITRARY) {
-            revert NoTrustedSignature();
-        }
-
         // Zero is the EVM-visible marker for the canonical transaction hash.
         // An explicit digest does not authorize this frame list.
         if (!FrameTxLib.signedThisTx(signatureIndex)) revert NoTrustedSignature();
+        // The protocol already validated whichever native scheme produced this
+        // address. ARBITRARY has no resolved signer, so this read fails closed.
         if (FrameTxLib.sigSigner(signatureIndex) != owner) revert NoTrustedSignature();
 
         // Use the scope named by this frame: BOTH for self relay, EXECUTION when

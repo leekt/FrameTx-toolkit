@@ -5,8 +5,8 @@
 **The protocol verifies signatures before any of your code runs, but your account must check
 what each signature signed.**
 
-Every upstream `SECP256K1`/`P256` entry, and every toolkit-local ML-DSA-44 scheme-`0x03`
-entry, is checked before frame execution. An entry with empty `msg` is checked against the
+Every `SECP256K1`/`P256` entry is checked before frame execution. An entry with empty `msg`
+is checked against the
 canonical transaction signature hash; an entry with a 32-byte `msg` is checked against that
 explicit digest. Both are protocol-valid. Only the empty-`msg` case necessarily commits to
 this transaction's frame list.
@@ -61,35 +61,20 @@ verify the witness in the account. The exact 2 KiB-bounded ABI, client-data JSON
 authenticator flags, constructors, and deliberate omissions are specified in
 [`contracts/docs/09-p256-and-webauthn.md`](../contracts/docs/09-p256-and-webauthn.md).
 
-These policies remain exact after adding the local post-quantum scheme: P256 contracts still
-require scheme `0x02`, and WebAuthn contracts still require their exact scheme-`0x00`
-assertion. Neither accepts ML-DSA-44 implicitly.
+P256 contracts require scheme `0x02`, and WebAuthn contracts require their exact
+scheme-`0x00` assertion.
 
-## Native ML-DSA-44
+## Post-quantum signatures use `ARBITRARY`
 
-Scheme `0x03` is an explicitly **non-normative toolkit-local allocation**; upstream
-EIP-8141 reserves it. Its raw field is exactly
-`2,420-byte FIPS signature || 1,312-byte public key`, and its address identity is:
+EIP-8141 reserves schemes `0x03` through `0xff`; this toolkit does not assign one to
+ML-DSA. An ML-DSA experiment must carry its application-defined proof material in an
+`ARBITRARY` (`0x00`) entry with an empty `signer`. Validation-frame or custom-verifier code
+copies the bytes with `SIGDATACOPY`, verifies them, binds the result to the canonical
+transaction signature hash and the account's key policy, and only then calls `APPROVE`.
 
-```text
-low20(keccak256(0x03 || publicKey))
-```
-
-The node uses pure FIPS 204 ML-DSA-44 with an empty context over the already-selected
-32-byte FrameTx message. It rejects any field not exactly 3,732 bytes and any non-canonical
-key/signature decoding. The local verification charge is provisionally 50,000 gas, separate
-from the intrinsic data and calldata-floor cost of carrying that large wire.
-
-`OwnerAccount`, `SessionKeyAccount`, and both Yul accounts accept the ML-DSA identity through
-their generic native-signer policy. `MultisigAccount` explicitly permits it alongside
-secp256k1 and P256. Use `MLDSAAccount` or `MLDSAPaymaster` when the policy itself must require
-exactly scheme `0x03`.
-
-The current 100,000-gas public validation limit matters for threshold designs. One ML-DSA
-plus one secp256k1 entry costs 52,800 before frame code and leaves at most 47,200 gas for
-hybrid validation. Two ML-DSA entries use the entire limit before the multisig executes and
-are therefore not public-mempool eligible under that rule. Full wire, API, key-lifecycle,
-test, and unaudited-dependency details are in
+The toolkit currently ships no ML-DSA witness ABI, verifier, account, or paymaster. Gas and
+public-mempool eligibility therefore depend on the verifier an application eventually
+implements; no native verification charge or signer identity exists. See
 [`contracts/docs/10-pq.md`](../contracts/docs/10-pq.md).
 
 ## The opcodes
@@ -123,16 +108,8 @@ to the transaction encoding in the normative spec body.
 Normative `TXPARAM`: `0x00` tx type · `0x01` scalar wire `nonce` · `0x02` sender ·
 `0x03`-`0x05` `fees` fields · `0x06` max cost · `0x07` blob count · `0x08` **canonical
 signature hash** · `0x09` frame count · `0x0A` current frame index · `0x0B` signature
-count · `0x0C` state gas left in the current frame. Other selectors below `0x80` are
-undefined.
-
-Non-normative fixture `TXPARAM` extensions live at `0x80`+: the supplied context treats
-`0x01` as a shared keyed-nonce sequence and adds `0x80` sender legacy nonce · `0x81`
-supplied nonce-key count · `0x82` supplied nonce-key hash · `0x83` supplied
-recent-root-reference count · `0x84` first supplied nonce key. `0x84` halts for an empty
-list; `0x85` is undefined and halts. These values come from `setFrameTx`/host context;
-they are not extra fields in the current RLP payload and the fixture does not implement
-keyed-nonce state transitions.
+count · `0x0C` state gas left in the current frame. All other selectors are undefined and
+exceptional-halt.
 
 `FRAMEPARAM`: `0x00` resolved_target · `0x01` limits.execution · `0x02` mode · `0x03`
 flags · `0x04` len(data) · `0x05` status (halts for the current or a later frame) · `0x06`
@@ -239,7 +216,8 @@ The protocol-supplied **empty-code** account is narrower than these coded polici
 remains secp256k1-only. A codeless secp256k1 owner may put its canonical entry at index `1`,
 let a `MultisigAccount` count that same entry for execution, and let a later PAYMENT-only
 frame against the owner reuse it through default code. That is one signature entry, not two.
-An ML-DSA identity needs compatible account code or delegation to act as payer.
+An account using an `ARBITRARY` post-quantum witness needs compatible account code or
+delegation to act as payer.
 
 ## Constraints that will bite you
 
@@ -261,10 +239,13 @@ whole frame list. The session-key example additionally walks every frame to impo
 target/selector/value policy.
 
 **Treat `signatureIndex` as signed routing, not as trusted authentication by itself.**
-An ordinary account must still reject an out-of-range index through normal failure, filter
-the scheme before requesting a resolved signer, require the canonical-hash case, and apply
-its key policy. Receiving one index means that one entry must authorize or validation must
-fail. Only a multisig should accept an index array and loop over selected entries.
+An ordinary address-policy account must still reject an out-of-range index through normal
+failure, require the canonical-hash case, and apply its key policy. It need not whitelist
+native schemes before requesting a resolved signer: the protocol already verified them,
+while `ARBITRARY` has no resolved signer and fails closed. Exact-algorithm, raw-witness, and
+skip-unsupported policies still inspect the scheme. Receiving one index means that one entry
+must authorize or validation must fail. Only a multisig should accept an index array and loop
+over selected entries.
 
 **A function calling `approvetx` cannot be `view`.** It changes state: it bumps the sender's
 nonce, sets the payer and collects `max_cost`. Functions using only the introspection
@@ -285,19 +266,9 @@ not yet an Anvil WebAuthn end-to-end test in this repository. The native-P256 An
 does submit a raw type-`0x06` transaction through `P256Account`, including a corrupted-key
 admission negative and mined payer, nonce, and SENDER-effect assertions.
 
-Standalone Yul, which works on **stock** solc too via `verbatim`:
-
-```bash
-solidity/build/solc/solc --strict-assembly --bin account.yul
-```
-
-`verbatim` argument order: the **first** argument ends up on **top** of the stack, so the
-argument list reads in the same order as the spec's stack table. Verified —
-`verbatim_3i_0o(hex"aa", 0x11, 0x22, 0x33)` compiles to `6033 6022 6011 aa`.
-
 > `verbatim` is **not** available inside Solidity `assembly {}` blocks on any solc, stock or
-> forked — it is a Yul-dialect builtin only. That limitation is the entire reason this fork
-> exists.
+> forked. Solidity account code using Frame opcodes therefore needs the patched compiler's
+> named builtins.
 
 ## Testing an account
 
@@ -337,7 +308,9 @@ The inherited suite supplies shifted, non-zero signature indices and proves:
 - validation while a later paymaster pays (`EXECUTION`);
 - payment for another already-approved sender (`PAYMENT`);
 - exact-scope approval and rejection when no scope is permitted;
-- rejection when valid account signatures exist but are not selected; and
+- rejection when valid account signatures exist but are not selected;
+- rejection of wrong secp256k1 and P256 signatures;
+- rejection when the selected authorization is a malformed `ARBITRARY` signature; and
 - an ordinary empty-calldata ETH funding path.
 
 Keep policy-specific positive and negative cases in the concrete test. The suite inherits
@@ -354,11 +327,13 @@ Paymasters have the parallel
 [`contracts/test/PaymasterTestSuite.sol`](../contracts/test/PaymasterTestSuite.sol). A
 concrete paymaster test supplies `_paymasterUnderTest()`, `_paymasterTestSignature()`,
 `_paymasterTestCall(uint256)`, and `_paymasterTestMaxCost()`. The inherited matrix uses one
-shared, shifted signature envelope to require sponsorship of all ten targets:
-`OwnerAccount`, `MultisigAccount`, `SessionKeyAccount` through its owner, the portable and
-builtin Yul accounts, `P256Account`, `WebAuthnAccount`, `MLDSAAccount`, the migrated Kernel
+shared, shifted signature envelope to require sponsorship of all configured targets:
+`OwnerAccount`, `MultisigAccount`, `SessionKeyAccount` through its owner, `P256Account`,
+`WebAuthnAccount`, the migrated Kernel
 v3.3 proxy, and the EIP-7702-delegated EOA, plus refusal of a misrouted paymaster index. The
-secp256k1, P256, WebAuthn, and ML-DSA paymaster tests all inherit this matrix.
+matrix also refuses wrong secp256k1 and P256 sponsor signatures and a selected malformed
+`ARBITRARY` sponsor signature. The secp256k1, P256, and WebAuthn paymaster tests all inherit
+this matrix.
 
 Sender-specific signature policies can override `_preparePaymasterForAccount(address)`.
 A proof-only or allowlist-only paymaster needs a policy-specific suite because this shared
@@ -370,13 +345,10 @@ address hooks.
 These suites execute real bytecode and frame opcodes, but their `setFrameTx` transaction
 context is synthetic. They do not test type-`0x06` admission, nonce changes, or eventual ETH
 debits and refunds. Native P256 cases trust host-supplied, already-verified metadata rather
-than a raw envelope signature; native ML-DSA contract cases have the same metadata-only
-boundary. WebAuthn cases create a real P256 assertion and invoke
+than a raw envelope signature. WebAuthn cases create a real P256 assertion and invoke
 precompile `0x100`, but their challenge is the synthetic fixture's signature hash.
-Rust transaction tests exercise real ML-DSA-44 verification, and the raw Anvil suite runs
-the 3,732-byte wire through production `MLDSAAccount`, including corrupt admission and mined
-payer/debit/nonce/SENDER assertions. A second raw case pins index-1 multisig-owner payer
-reuse. WebAuthn remains the path without a raw end-to-end case.
+A raw Anvil case pins index-1 multisig-owner payer reuse. WebAuthn remains without a raw
+end-to-end case, and no ML-DSA verifier or transaction path is shipped.
 
 > [!warning] Always include a positive case
 > `assertRefuses` passes if the call fails for *any* reason, including the account never

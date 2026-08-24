@@ -7,9 +7,8 @@
   `(target, selector)` pairs, with an expiry no later than the key's `validUntil`.
 
 The account never runs `ecrecover`. The protocol validates every supported native entry
-before frame execution: `SECP256K1`, `P256`, and this toolkit's experimental ML-DSA-44
-scheme `0x03`. The account inspects signer metadata, requires the canonical
-transaction-hash case, and applies its owner or session policy.
+before frame execution: `SECP256K1` and `P256`. The account inspects signer metadata,
+requires the canonical transaction-hash case, and applies its owner or session policy.
 
 ## Single-index validation ABI and signature routing
 
@@ -32,18 +31,16 @@ The index is itself authenticated. VERIFY-frame calldata is included in the fram
 covered by `compute_sig_hash(tx)`, so changing the selected entry invalidates the canonical
 signatures. The selected entry still needs policy checks:
 
-- filter `ARBITRARY` before requesting `resolved_signer`;
 - require `msg == 0`, the EVM marker for the canonical transaction hash; and
 - require the resolved signer to be the owner or a registered session key.
 
-An out-of-range selected index fails the `SIGPARAM` bounds check. An explicit-digest
+An out-of-range selected index fails the `SIGPARAM` bounds check. Selecting `ARBITRARY`
+fails when the account requests its nonexistent `resolved_signer`. An explicit-digest
 signature may be protocol-valid, but it does not commit to this transaction and is ignored.
 
-Because the policy keys are addresses, either the owner or a session key may use any of the
-three native schemes. Configure an ML-DSA-44 key as
-`low20(keccak256(0x03 || publicKey))`; the account does not store or parse the public key.
-The exact non-normative wire and its gas limits are documented in
-[`10-pq.md`](10-pq.md).
+Because the policy keys are addresses, either the owner or a session key may use either
+native scheme. This account does not parse `ARBITRARY` post-quantum witnesses; adding one
+requires a separate verifier and policy integration as described in [`10-pq.md`](10-pq.md).
 
 ## Why every SENDER frame is checked
 

@@ -10,10 +10,9 @@ pragma solidity ^0.8.30;
 /// @dev    Requires the patched solc (`--experimental --evm-version @future`);
 ///         it also exposes the local, non-normative tooling-fixture allocation
 ///         RECENTROOTREFLOAD (0xb6), TXTRACE (0xb7), TXDIFF (0xb8), and
-///         EVENTDATACOPY (0xb9). Fixture TXPARAM selectors live at 0x80-0x84,
-///         clear of the normative table; they, mode MODE_POST_TX, recent
-///         roots, and trace/diff/event values are supplied by the host; this
-///         library does not make them transaction-wire data.
+///         EVENTDATACOPY (0xb9). Mode MODE_POST_TX, recent roots, and
+///         trace/diff/event values are supplied by the host; this library does
+///         not make them transaction-wire data.
 ///         Every function requires an active frame context. An absent context,
 ///         an out-of-bounds index, or another halt case flagged below causes an
 ///         exceptional halt, not a revert. TXTRACE, TXDIFF, and EVENTDATACOPY
@@ -28,7 +27,6 @@ library FrameTxLib {
     uint256 internal constant SCHEME_ARBITRARY = 0;
     uint256 internal constant SCHEME_SECP256K1 = 1;
     uint256 internal constant SCHEME_P256 = 2;
-    uint256 internal constant SCHEME_ML_DSA_44 = 3;
 
     /// Frame modes (`frameMode`). Modes 0-2 are normative EIP-8141;
     /// MODE_POST_TX is a non-normative tooling-fixture mode.
@@ -63,8 +61,6 @@ library FrameTxLib {
     }
 
     /// @notice The scalar wire nonce under normative EIP-8141 (TXPARAM 0x01).
-    ///         A non-normative tooling fixture instead supplies this field as
-    ///         a shared keyed-nonce sequence.
     function txNonce() internal view returns (uint256 v) {
         assembly ("memory-safe") {
             v := txparam(0x01)
@@ -153,47 +149,6 @@ library FrameTxLib {
     function stateGasLeft() internal view returns (uint256 v) {
         assembly ("memory-safe") {
             v := txparam(0x0C)
-        }
-    }
-
-    /// @notice Host-supplied sender legacy nonce in transaction pre-state
-    ///         (fixture TXPARAM 0x80), distinct from the fixture interpretation
-    ///         of `txNonce()` as a shared sequence. Non-normative.
-    function legacyNonce() internal view returns (uint256 v) {
-        assembly ("memory-safe") {
-            v := txparam(0x80)
-        }
-    }
-
-    /// @notice Number of host-supplied nonce keys (fixture TXPARAM 0x81).
-    ///         Non-normative; the opcode does not validate their ordering.
-    function nonceKeyCount() internal view returns (uint256 v) {
-        assembly ("memory-safe") {
-            v := txparam(0x81)
-        }
-    }
-
-    /// @notice Host-supplied nonce-key-list hash (fixture TXPARAM 0x82).
-    ///         Non-normative; the opcode and cheatcode do not derive it.
-    function nonceKeysHash() internal view returns (bytes32 v) {
-        assembly ("memory-safe") {
-            v := txparam(0x82)
-        }
-    }
-
-    /// @notice Number of host-supplied recent-root references
-    ///         (fixture TXPARAM 0x83). Non-normative and not verified here.
-    function recentRootReferenceCount() internal view returns (uint256 v) {
-        assembly ("memory-safe") {
-            v := txparam(0x83)
-        }
-    }
-
-    /// @notice First host-supplied nonce key (fixture TXPARAM 0x84).
-    ///         Non-normative; exceptional-halts when the fixture list is empty.
-    function firstNonceKey() internal view returns (uint256 v) {
-        assembly ("memory-safe") {
-            v := txparam(0x84)
         }
     }
 
@@ -367,8 +322,9 @@ library FrameTxLib {
 
     /// @notice The signer the protocol recovered and verified (SIGPARAM 0x00).
     ///         A verified fact, not a recovery: no ecrecover here. Halts for an
-    ///         ARBITRARY entry, which has no protocol signer -- check
-    ///         `sigScheme` first when the entry is not under your control.
+    ///         ARBITRARY entry, which has no protocol signer. Generic address
+    ///         policies may use that as fail-closed behavior; policies that branch
+    ///         or skip unsupported entries should inspect `sigScheme` first.
     function sigSigner(uint256 signatureIndex) internal view returns (address v) {
         assembly ("memory-safe") {
             v := sigparam(signatureIndex, 0x00)

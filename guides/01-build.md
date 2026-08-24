@@ -13,14 +13,14 @@ The root gitlinks, Foundry's twelve REVM manifest patches, and `Cargo.lock` reco
 current stack in [VERSIONS.md](../VERSIONS.md). A fresh recursive clone reproduces it:
 
 - Solidity `develop` is pinned at `4c6c547d9a35b23807f421692ac65c35f26f3d54`.
-- revm `main` is pinned at `3c82639a34a104af73d9aea0e9b50b005caace81`.
+- revm `main` is pinned at `21ace0ade666d99f3e1c6e95ba173972164d0ceb`.
 - foundry-core `main` is pinned at `f415f6fef0a62f44c7faa83daa8e37b14f0e009b`.
-- Foundry `master` is pinned at `6cfbfd4e76cb275e1974caebfbf3b88d13c70c37`.
+- Foundry `master` is pinned at `5683db7dc79cace93363fe3465e20792b859bec9`.
 - The official Kernel v3.3 fixture is pinned at
   `cd697c7e21715d015e0643af22310a99aa17433b`.
 
 The four toolchain forks publish EIP-8141 on their default branches. Foundry promotion passed
-30/30 primitives, 44/44 Anvil unit, and 31/31 Anvil integration tests. The root gitlinks pin
+27/27 primitives, 44/44 Anvil unit, and 30/30 Anvil integration tests. The root gitlinks pin
 those commits and the Kernel fixture; `git submodule update --init --recursive` checks out all
 five top-level submodules and Kernel's nested dependencies. For update discovery, the
 repository's sync command fetches remote refs without automatically replacing the recorded
@@ -93,8 +93,8 @@ older submodule state.
 
 Foundry's manifest and lockfile pin all twelve REVM crates and the foundry-core compilers
 fork (which adds the `@future` EVM version) to the current revisions. Foundry commit
-`6cfbfd4e76cb275e1974caebfbf3b88d13c70c37` targets revm
-`3c82639a34a104af73d9aea0e9b50b005caace81` and foundry-core
+`5683db7dc79cace93363fe3465e20792b859bec9` targets revm
+`21ace0ade666d99f3e1c6e95ba173972164d0ceb` and foundry-core
 `f415f6fef0a62f44c7faa83daa8e37b14f0e009b`; all three commits are pushed and resolve from a
 clean recursive clone:
 
@@ -120,9 +120,9 @@ cd ../contracts
 ../foundry/target/release/forge test --allow-local-compiler
 ```
 
-The current project result is 324 passed, 0 failed, and 0 skipped across 19 suites. That
+The current project result is 260 passed, 0 failed, and 0 skipped across 15 suites. That
 includes the Kernel v3.3 factory/proxy migration, the same-address EIP-7702 migration, all
-three Frame account roles, both rollback paths, and sponsorship by all four example
+three Frame account roles, both rollback paths, and sponsorship by all three example
 paymasters.
 
 Current Foundry requires `--allow-local-compiler` for an executable configured by path.

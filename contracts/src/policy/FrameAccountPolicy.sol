@@ -9,7 +9,7 @@ pragma solidity ^0.8.24;
 /// EIP-8141 splits an account cleanly in two:
 ///
 ///  1. Before any frame runs, the protocol verifies every native signature
-///     (`SECP256K1`, `P256`, or toolkit-local `ML-DSA-44`) against either the
+///     (`SECP256K1` or `P256`) against either the
 ///     canonical transaction hash (empty `msg`) or the entry's explicit digest.
 ///     The account never performs the underlying cryptography.
 ///  2. The account is left with a policy question: given the set of keys that

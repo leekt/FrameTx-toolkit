@@ -15,8 +15,8 @@ EIP-8250/8272/7906-inspired fixture fields on the wire, public-mempool policy, o
 | Implemented | Baseline Anvil RPC | Decode, validate, mine, retrieve, trace, and replay raw type-`0x06` transactions (scalar nonce, `fees`/`limits` envelope); atomic batches, default code, canonical raw-byte fork replay, and transaction-hash forks are covered by [`frame_tx.rs`](../foundry/crates/anvil/tests/it/frame_tx.rs). |
 | Implemented | Frame receipts | Consensus receipt encoding and trie roots include the payer and ordered `[status, gas_used, logs]` frame results; RPC receipts expose these as `payer` and `frameReceipts`. |
 | Implemented | Expiry activation | Enabled nodes install the canonical verifier at `0x8141` after source replay, and memory/fork resets restore it. |
-| Experimental | Toolkit-local ML-DSA-44 | Native pure-mode FIPS 204 verification at upstream-reserved scheme `0x03`, exact 3,732-byte wire, 50,000-gas placeholder, dedicated account/paymaster policy tests, and a raw production-account Anvil path. This is experimental and non-portable. |
-| Missing | Fixture-inspired wire/state integration | No keyed-nonce list/state, recent-root list/verification, trace construction, or `POST_TX` suffix execution. Those fields exist only in synthetic `setFrameTx` fixtures. |
+| Missing | Ready post-quantum verifier | Schemes `0x03` through `0xff` remain reserved. ML-DSA would require an `ARBITRARY` witness plus validation-frame or custom-verifier code; no witness profile, verifier, account, paymaster, or raw Anvil path is shipped. |
+| Missing | Fixture-inspired wire/state integration | No keyed-nonce list/state, recent-root list/verification, trace construction, or `POST_TX` suffix execution. Keyed nonces are not exposed by the fixture; recent-root and trace values remain synthetic `setFrameTx` inputs only. |
 | Missing | Prefix policy | The validation-prefix simulation and DoS rules from the spec are not implemented as a public transaction-pool admission policy. |
 | Partial | Sponsorship RPC path | A raw-RPC default-code sponsor is covered end to end; a contract `pay` frame and canonical-paymaster pool accounting are not. |
 | Known divergence | Fee-field width | Upstream admits fee scalars below `2**256`. The Frame decoder represents them as 256-bit values, but the current Alloy/REVM transaction APIs are `u128`, so Foundry validation rejects any fee field above `u128::MAX`. |
@@ -29,11 +29,11 @@ EIP-8250/8272/7906-inspired fixture fields on the wire, public-mempool policy, o
 [VERSIONS.md](../VERSIONS.md#reproducibility-status) and the root gitlinks record this
 reproducible current-spec stack. The four toolchain forks publish it on their default
 branches: Solidity `develop` at `4c6c547d9a35b23807f421692ac65c35f26f3d54`, revm `main`
-at `3c82639a34a104af73d9aea0e9b50b005caace81`, foundry-core `main` at
+at `21ace0ade666d99f3e1c6e95ba173972164d0ceb`, foundry-core `main` at
 `f415f6fef0a62f44c7faa83daa8e37b14f0e009b`, and Foundry `master` at
-`6cfbfd4e76cb275e1974caebfbf3b88d13c70c37`. The official Kernel v3.3 fixture is pinned at
-`cd697c7e21715d015e0643af22310a99aa17433b`. Foundry promotion passed 30/30 primitives,
-44/44 Anvil unit, and 31/31 Anvil integration tests. A fresh recursive clone checks out these
+`5683db7dc79cace93363fe3465e20792b859bec9`. The official Kernel v3.3 fixture is pinned at
+`cd697c7e21715d015e0643af22310a99aa17433b`. Foundry promotion passed 27/27 primitives,
+44/44 Anvil unit, and 30/30 Anvil integration tests. A fresh recursive clone checks out these
 exact revisions and the Kernel fixture's nested dependencies.
 
 ## Activation and execution profiles
@@ -72,20 +72,18 @@ instead of trying to reconstruct unknown typed fields from JSON-RPC.
 
 ## Deliberate divergences and design notes
 
-### ML-DSA-44 scheme `0x03` is toolkit-local
+### Post-quantum verification is not shipped
 
-Upstream EIP-8141 reserves signature scheme `0x03`. The patched host assigns it to an
-experimental ML-DSA-44 profile so native post-quantum policy can be tested before an
-upstream wire is chosen. Its raw field is exactly `signature[2420] || publicKey[1312]`, its
-identity is `low20(keccak256(0x03 || publicKey))`, it verifies pure FIPS 204 with an empty
-context over the existing 32-byte FrameTx message, and it carries a provisional 50,000-gas
-verification charge.
+EIP-8141 reserves signature schemes `0x03` through `0xff`, and the toolkit follows that
+allocation. An ML-DSA experiment must use an `ARBITRARY` (`0x00`) entry with an empty
+`signer`, then copy and verify the application-defined witness in a validation frame or
+custom verifier. The proof must bind to the canonical transaction signature hash and the
+account's authorization policy.
 
-This is a consensus difference, not a convenience encoding: an upstream client rejects the
-scheme, and a future upstream allocation may conflict. The RustCrypto implementation is
-pinned but explicitly unaudited. The exact decoder, advisory note, gas/size consequences,
-contracts, default-code boundary, and tests are in
-[`contracts/docs/10-pq.md`](../contracts/docs/10-pq.md).
+No canonical witness encoding, ML-DSA verifier, account, paymaster, signer identity, gas
+schedule, or raw Anvil test is provided. See
+[`contracts/docs/10-pq.md`](../contracts/docs/10-pq.md) for this boundary and the possible
+future pure-function validation direction.
 
 ### `APPROVE` is spelled `approvetx` in Solidity and Yul
 
@@ -197,9 +195,9 @@ the local implementation overlay rather than relying on a summary.
 
 Run `tools/check-spec-drift.sh` to compare current upstream EIP-8141 with exact official pin
 `f767a1e8078e17c9b381a91d35a09492189ede1b`. [`spec/EIP8141.md`](../spec/EIP8141.md)
-contains that current-master normative body, the non-normative ML-DSA-44 scheme `0x03`,
-explanatory toolkit notes, and a separate non-normative tooling-fixture appendix; none of
-those local deltas is the checker's byte-for-byte baseline.
+contains that current-master normative body, explanatory toolkit notes, and a separate
+non-normative tooling-fixture appendix; those local notes are not the checker's byte-for-byte
+baseline.
 Consult [VERSIONS.md](../VERSIONS.md) for the current stack's map from spec areas to affected
 code.
 

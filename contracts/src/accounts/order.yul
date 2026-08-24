@@ -1,4 +1,4 @@
-// Argument-order probe for verbatim. See README.md, "Verbatim argument order".
+// Argument-order probe: the first verbatim argument is emitted last and lands on stack top.
 //   solc --strict-assembly --asm --bin order.yul
 // Emits `603360226011aa`: the LAST argument is pushed FIRST, so the FIRST
 // argument (0x11) is on top of the stack when the opcode runs.

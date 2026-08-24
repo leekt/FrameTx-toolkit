@@ -14,10 +14,10 @@ add the protocol behavior and patches Foundry to use that fork.
 This table describes behavior exercised in the reproducible current-spec stack recorded in
 [VERSIONS.md](../VERSIONS.md). The four toolchain forks publish it on their default branches:
 [Solidity](../solidity/) `develop` at `4c6c547d9a35b23807f421692ac65c35f26f3d54`,
-[revm](../revm/) `main` at `3c82639a34a104af73d9aea0e9b50b005caace81`,
+[revm](../revm/) `main` at `21ace0ade666d99f3e1c6e95ba173972164d0ceb`,
 [foundry-core](../foundry-core/) `main` at
 `f415f6fef0a62f44c7faa83daa8e37b14f0e009b`, and [Foundry](../foundry/) `master` at
-`6cfbfd4e76cb275e1974caebfbf3b88d13c70c37`. The root gitlinks pin those exact commits and
+`5683db7dc79cace93363fe3465e20792b859bec9`. The root gitlinks pin those exact commits and
 official Kernel v3.3 at `cd697c7e21715d015e0643af22310a99aa17433b`, so a fresh recursive
 clone reproduces the toolchain and migration fixture.
 
@@ -25,13 +25,13 @@ clone reproduces the toolchain and migration fixture.
 |---|---|
 | revm executes the seven opcodes | **Done** — covered by interpreter and account tests |
 | revm/compiler execute provisional B6-B9 | **Done** — synthetic `setFrameTx` contexts only |
-| `forge` built against the patched revm | **Done** — Foundry `6cfbfd4e76cb275e1974caebfbf3b88d13c70c37` resolves every revm crate to primary head `3c82639a34a104af73d9aea0e9b50b005caace81` |
+| `forge` built against the patched revm | **Done** — Foundry `5683db7dc79cace93363fe3465e20792b859bec9` resolves every revm crate to primary head `21ace0ade666d99f3e1c6e95ba173972164d0ceb` |
 | `forge build` compiling `@future` sources natively | **Done** — refreshed foundry-core `f415f6fef0a62f44c7faa83daa8e37b14f0e009b` adds `EvmVersion::Future`; `evm_version = "@future"` plus `experimental = true` drive the patched solc over standard JSON |
-| Current-spec Foundry promotion | **Done** — 30/30 primitives, 44/44 Anvil unit, and 31/31 Anvil integration tests pass |
+| Current-spec Foundry promotion | **Done** — 27/27 primitives, 44/44 Anvil unit, and 30/30 Anvil integration tests pass |
 | `setFrameTx` / `clearFrameTx` cheatcodes | **Done** |
-| `forge test` executing frame accounts | **Done** — 324/324 tests across 19 suites, including real Kernel v3.3 and EIP-7702 migration fixtures, all account roles, both rollback paths, and all four paymasters |
+| `forge test` executing frame accounts | **Done** — 260/260 tests across 15 suites, including malformed/wrong signature refusal for supported paths, real Kernel v3.3 and EIP-7702 migration fixtures, all account roles, both rollback paths, and the paymaster matrix |
 | anvil accepting baseline type `0x06` transactions | **Done** — explicit opt-in; decode, validate, and execute through the integration suite |
-| Toolkit-local native ML-DSA-44 | **Done, experimental** — scheme `0x03`, exact canonical wire, native cryptographic unit tests, production-account raw Anvil execution, and contract policy suites; upstream reserves the value |
+| Post-quantum verification | Not shipped — ML-DSA must use an `ARBITRARY` witness and validation-frame/custom-verifier logic; no verifier, account, paymaster, or raw Anvil path is included |
 | Atomic batches and default code in anvil | **Done** — terminator rollback, mid-batch skip, signature-index selection all pinned |
 | Frame receipts and receipt trie roots | **Done** — `payer` plus ordered `frameReceipts` over RPC and canonical typed consensus encoding |
 | Raw tracing and fork replay | **Done** — `trace_rawTransaction`, `trace_replayTransaction`, raw-block fetches, and transaction-hash replay |
@@ -58,12 +58,10 @@ cargo build --locked --bin forge --bin anvil
 
 Foundry's twelve manifest patches and lockfile resolve to the current REVM commit pinned by
 the root repository's `revm` gitlink. Foundry commit
-`6cfbfd4e76cb275e1974caebfbf3b88d13c70c37` resolves them to revm
-`3c82639a34a104af73d9aea0e9b50b005caace81` and foundry-core
+`5683db7dc79cace93363fe3465e20792b859bec9` resolves them to revm
+`21ace0ade666d99f3e1c6e95ba173972164d0ceb` and foundry-core
 `f415f6fef0a62f44c7faa83daa8e37b14f0e009b`. Both dependency revisions are pushed and the
 locked graph resolves from a clean recursive clone.
-The refreshed Foundry commit also pins RustCrypto `ml-dsa` exactly at `0.1.1`; do not relax
-that dependency while reproducing the documented decoder and advisory status.
 
 > [!warning] Patch every revm crate together
 > `foundry/Cargo.toml` patches **all twelve** revm crates to the same immutable fork revision.
@@ -108,9 +106,8 @@ struct FrameTxFrame  { uint8 mode; uint8 flags; address target; uint64 gasLimit;
                        uint64 executionGasUsed; uint64 stateGasUsed; }
 struct FrameTxSignature { uint8 scheme; address signer; bytes32 msgHash; bytes signature; }
 struct FrameTxRecentRootReference { bytes32 sourceId; uint64 slot; bytes32 root; }
-struct FrameTx { address sender; uint64 nonce; uint64 legacyNonce;
-                 uint256[] nonceKeys; bytes32 nonceKeysHash; uint64 stateGasLeft;
-                 bytes32 sigHash; uint256 maxCost; uint256 maxPriorityFeePerGas;
+struct FrameTx { address sender; uint64 nonce; uint64 stateGasLeft; bytes32 sigHash;
+                 uint256 maxCost; uint256 maxPriorityFeePerGas;
                  uint256 maxFeePerGas; uint256 maxFeePerBlobGas; uint64 blobCount;
                  uint64 frameIndex; FrameTxFrame[] frames; FrameTxSignature[] signatures;
                  FrameTxRecentRootReference[] recentRootReferences;
@@ -135,18 +132,15 @@ Frame transactions are disabled by default. Start Anvil with
 `--enable-frame-transactions`, then submit the baseline type `0x06` through
 `eth_sendRawTransaction`. Object-form Frame requests are rejected; this path intentionally
 requires the canonical signed envelope. The envelope, canonical signature hash (with
-empty-`msg` elision), native secp256k1/P256 entries, the toolkit-local ML-DSA-44 wire, frame
+empty-`msg` elision), native secp256k1/P256 entries, frame
 execution with correct callers, VERIFY-as-static, the approval context, atomic batches, and
 default code are all implemented and covered by `crates/anvil/tests/it/frame_tx.rs` in the
 foundry submodule. The integration tests assert on resulting state, payment, typed receipts
 and their trie root, raw traces, and fork replay rather than only transaction acceptance.
 
-The ML-DSA raw test runs the production `MLDSAAccount` runtime with a real 3,732-byte
-signature/public-key entry, keeps declared native verification plus VERIFY-frame execution
-at 95,000 gas, rejects a corrupted signature at admission, then checks the mined payer,
-balance debit, sender nonce, and SENDER-frame effect. A separate raw test puts a codeless
-secp256k1 multisig owner's signature at index 1, counts it for multisig execution, and reuses
-it in the later default PAYMENT frame. Its declared verification prefix is 65,600 gas; the
+A raw test puts a codeless secp256k1 multisig owner's signature at index 1, counts it for
+multisig execution, and reuses it in the later default PAYMENT frame. Its declared
+verification prefix is 65,600 gas; the
 test proves the owner paid while the payer EOA's own account nonce did not advance.
 
 The opt-in is supported on Ethereum execution profiles before Amsterdam. OP Stack, Tempo,
@@ -161,10 +155,9 @@ as the typed consensus receipt and included in the block receipt trie. Parity
 diffs; raw tracing does not commit them. Fork replay fetches and verifies canonical raw bytes,
 including for transaction-hash forks whose source block contains type `0x06`.
 
-The real wire path still has the pinned scalar nonce and no recent-root list or POST_TX
-suffix. Its host context projects that scalar into a synthetic nonce-key list `[0]` for
-fixture introspection, but does not implement keyed state, recent-root verification, trace
-construction, or POST_TX rollback. Those non-normative fields are otherwise available only
+The real wire path has the pinned scalar nonce and no keyed-nonce list, recent-root list, or
+POST_TX suffix. It does not implement keyed state, recent-root verification, trace
+construction, or POST_TX rollback. Recent-root and POST_TX trace values are available only
 as host-supplied `setFrameTx` fixture data.
 
 Frames execute inside one persistent outer REVM journal. Later frames observe earlier writes,

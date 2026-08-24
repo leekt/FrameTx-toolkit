@@ -11,8 +11,8 @@ alongside the submodule state that implements the current toolkit.
 | **EIP-7851 upstream base** | `07f3bb3626d4db1f2ac501734fec5b3d32e185c5` | 2026-05-14 | [ethereum/EIPs](https://github.com/ethereum/EIPs) — `EIPS/eip-7851.md` |
 | **EIP-8151 upstream base** | `bf7a4067f263bf7ce01c1511de48473e281d885d` | 2026-07-27 | [ethereum/EIPs](https://github.com/ethereum/EIPs) — `EIPS/eip-8151.md` |
 | **Solidity gitlink (`develop`)** | `4c6c547d9a35b23807f421692ac65c35f26f3d54` | 2026-08-24 | [leekt/solidity `develop`](https://github.com/leekt/solidity/tree/develop), with the current EIP-8141 compiler work merged into the fork's default development branch |
-| **revm gitlink (`main`)** | `3c82639a34a104af73d9aea0e9b50b005caace81` | 2026-08-24 | [leekt/revm `main`](https://github.com/leekt/revm/tree/main), with the current EIP-8141 execution work merged into the fork's default branch |
-| **Foundry gitlink (`master`)** | `6cfbfd4e76cb275e1974caebfbf3b88d13c70c37` | 2026-08-24 | [leekt/foundry `master`](https://github.com/leekt/foundry/tree/master), with the current FrameTx/Anvil integration and primary-branch dependency pins |
+| **revm gitlink (`main`)** | `21ace0ade666d99f3e1c6e95ba173972164d0ceb` | 2026-08-24 | [leekt/revm `main`](https://github.com/leekt/revm/tree/main), with the current EIP-8141 execution work merged into the fork's default branch |
+| **Foundry gitlink (`master`)** | `5683db7dc79cace93363fe3465e20792b859bec9` | 2026-08-24 | [leekt/foundry `master`](https://github.com/leekt/foundry/tree/master), with the current FrameTx/Anvil integration and primary-branch dependency pins |
 | **foundry-core gitlink (`main`)** | `f415f6fef0a62f44c7faa83daa8e37b14f0e009b` | 2026-08-24 | [leekt/foundry-core `main`](https://github.com/leekt/foundry-core/tree/main), including experimental `@future` compiler support |
 | **ZeroDev Kernel v3.3 dependency** | `cd697c7e21715d015e0643af22310a99aa17433b` | 2025-04-03 | [zerodevapp/kernel](https://github.com/zerodevapp/kernel/tree/cd697c7e21715d015e0643af22310a99aa17433b), pinned at `contracts/vendor/kernel-v3.3` for the real factory/proxy/ECDSA-root migration fixture |
 
@@ -22,9 +22,8 @@ body matches the upstream base above. That upstream revision includes the standa
 dispatch before default code, uniform calldata-floor token accounting, and the current
 validation-prefix opcode restrictions. It also carries the `fees` and `limits` sublists,
 EIP-8037 state-gas budgets, two-dimensional receipts, `FRAME_TX_INTRINSIC_COST = 12000`,
-`TX_VALUE_COST`, and the EIP-7825 execution cap. A separate non-normative subsection assigns
-upstream-reserved signature scheme `0x03` to the toolkit's experimental ML-DSA-44 profile;
-that local wire is not part of the normative upstream body. The
+`TX_VALUE_COST`, and the EIP-7825 execution cap. The toolkit adds no signature schemes:
+`0x03` through `0xff` remain reserved. The
 [final appendix](spec/EIP8141.md#toolkit-appendix-non-normative-tooling-fixture-profile)
 documents the EIP-8250/8272/7906-inspired host context as a non-normative fixture only; it
 does not claim transaction-wire support for those extensions.
@@ -34,10 +33,10 @@ does not claim transaction-wire support for those extensions.
 The root gitlinks and the four toolchain forks' published default branches are aligned at the
 revisions above. A recursive clone of this root revision also fetches the pinned Kernel v3.3
 dependency. Foundry patches all twelve REVM crates to
-`3c82639a34a104af73d9aea0e9b50b005caace81` and resolves its seven foundry-core-derived
+`21ace0ade666d99f3e1c6e95ba173972164d0ceb` and resolves its seven foundry-core-derived
 packages at `f415f6fef0a62f44c7faa83daa8e37b14f0e009b`; `Cargo.lock` records those exact
 revisions. The root checkout points at those same REVM and foundry-core commits, plus
-Foundry `6cfbfd4e76cb275e1974caebfbf3b88d13c70c37`, Solidity
+Foundry `5683db7dc79cace93363fe3465e20792b859bec9`, Solidity
 `4c6c547d9a35b23807f421692ac65c35f26f3d54`, and Kernel v3.3
 `cd697c7e21715d015e0643af22310a99aa17433b`.
 
@@ -57,11 +56,6 @@ authentication marker. See
 [guides/04-foundry.md](guides/04-foundry.md#how-the-context-reaches-the-evm) for why that
 constraint shaped the design.
 
-The pinned Foundry integration commit includes RustCrypto `ml-dsa` exactly at `0.1.1` for
-the local native scheme. That dependency and scheme are not upstream EIP-8141 requirements.
-The crate's maintainers explicitly warn that the implementation has not been independently
-audited.
-
 ## Checking whether the spec moved
 
 ```bash
@@ -70,9 +64,9 @@ tools/check-spec-drift.sh
 
 It fetches `EIPS/eip-8141.md` twice: once at the exact source pin above and once from current
 `ethereum/EIPs` master. It diffs those two upstream files. The local overlay is reported as
-such but is not used as the equality baseline, because its explanatory toolkit notes,
-experimental ML-DSA-44 scheme, and appendix would otherwise be misreported as upstream
-drift. Scheme `0x03` and the appendix remain expected local deltas.
+such but is not used as the equality baseline, because its explanatory toolkit notes and
+appendix would otherwise be misreported as upstream drift. The appendix remains an expected
+local delta.
 
 ## What to re-check when the spec changes
 
@@ -81,7 +75,7 @@ drift. Scheme `0x03` and the appendix remain expected local deltas.
 | Opcode numbers | `revm/crates/bytecode/src/opcode.rs`, `solidity/libevmasm/Instruction.{h,cpp}` |
 | Stack layouts or operand order | `revm/crates/interpreter/src/instructions/frame_tx.rs`, the arity table in `solidity/libevmasm/Instruction.cpp`, every account in `contracts/src/accounts` |
 | `APPROVE` scope semantics | `frame_tx.rs` (the subset rule), `contracts/test/FrameTest.sol`, all account tests |
-| `TXPARAM` / `FRAMEPARAM` / `SIGPARAM` parameter tables and `SIGDATACOPY` | `frame_tx.rs`, `guides/02-writing-accounts.md`, `FrameTxLib.sol` (fixture selectors live at `0x80+` so newly assigned normative selectors never collide) |
+| `TXPARAM` / `FRAMEPARAM` / `SIGPARAM` parameter tables and `SIGDATACOPY` | `frame_tx.rs`, `guides/02-writing-accounts.md`, `FrameTxLib.sol` |
 | Wire format, `fees`/`limits` lists, or the signature hash | `foundry/crates/primitives/src/transaction/frame.rs` (RLP + pinned vectors), anvil `frame_tx.rs`, the `setFrameTx` cheatcode structs, `FrameTest.sol` |
 | Gas constants, EIP-7825 cap, or EIP-8037 charge points | `frame.rs` `gas` module and `gas_limits()`, anvil `run_frames` settlement, `revm/crates/interpreter` |
 | Receipt shape | `foundry/crates/primitives/src/transaction/receipt.rs` (`FrameReceipt` and the pinned hex vector), anvil receipts |
@@ -95,16 +89,14 @@ drift. Scheme `0x03` and the appendix remain expected local deltas.
 
 ## Local overlay and fixture differences
 
-Native `SIGDATACOPY` is now part of the pinned upstream normative body. The ML-DSA-44 scheme
-`0x03`, B6-B9 allocation, `0x80+` fixture selectors, extended context, provisional gas, and
+Native `SIGDATACOPY` is now part of the pinned upstream normative body. The B6-B9 allocation,
+extended context, provisional gas, and
 the EIP-7851 opcode assignment below remain explicitly non-normative toolkit choices.
 
 | Divergence | Why |
 |---|---|
 | The `APPROVE` opcode is spelled `approvetx` in Solidity and Yul | `approve` is the ERC-20 method name; reserving it as a compiler builtin would break a large share of existing contracts. The opcode byte `0xaa` is unchanged. |
-| Signature scheme `0x03` is toolkit-local ML-DSA-44 | Upstream reserves the value. The local host requires exact `signature[2420] || publicKey[1312]`, derives `low20(keccak256(0x03 || publicKey))`, verifies pure FIPS 204 with empty context over the selected 32-byte message, and charges a provisional 50,000 gas. The pinned Foundry revision uses unaudited RustCrypto `ml-dsa = 0.1.1`; see `contracts/docs/10-pq.md`. |
 | Fee fields are narrower at the Foundry/Alloy boundary | The EIP admits canonical fee scalars below `2**256`, and the Frame wire decoder initially represents them as 256-bit values. The current transaction-trait and REVM fee APIs are `u128`, so validation rejects any fee field above `u128::MAX`. This is an explicit executable-profile limit, not an upstream constraint. |
-| Fixture `TXPARAM` selectors moved from `0x0C`-`0x10` to `0x80`-`0x84` | Upstream assigned `TXPARAM(0x0C)` to `state_gas_left`, colliding with the fixture legacy nonce. The fixture block now sits at `0x80+`, clear of any plausible normative growth; `0x0D`-`0x7F` and `0x85+` halt as undefined. |
 | State gas is metered for EIP-8141's own charge points only | The envelope carries per-frame `limits = [execution, state]`, budgets flow through `TXPARAM(0x0C)`/`FRAMEPARAM(0x09-0x0B)`, receipts report `gas_used = [execution, state]`, settlement and the payer charge include the state dimension, and the two account-creation charges (value-bearing frame, `APPROVE` sender creation) are charged at `STATE_BYTES_PER_NEW_ACCOUNT * CPSB`. Opcode-level EIP-8037 charging (`SSTORE`, code deposit) and cross-frame refill attribution are **pending**: EIP-8037 itself is not implemented in the forks, so those receipts' state dimension reflects only the frame-level charges. |
 | The tooling fixture assigns `RECENTROOTREFLOAD` through `EVENTDATACOPY` to `0xb6`-`0xb9` | This is a local compiler/interpreter allocation after native `SIGDATACOPY`, documented only in the non-normative appendix. It does not assign final upstream opcodes or transaction fields. |
 | Fixture `TXTRACE` uses flat gas `100`; `TXDIFF` uses `100` as its warm total | Direct TXDIFF selectors access host state on both diff hits and misses. Only the applicable EIP-2929 cold premium is added. The tests pin a local experiment; no consensus gas schedule is claimed. |
@@ -130,14 +122,14 @@ exact REVM and foundry-core revisions listed above.
 
 | Suite | Result |
 |---|---|
-| `contracts/` — debug `forge test`, native `@future` build (no external artifact script) | 324 passed, 0 failed, 0 skipped across 19 suites; includes ten account targets (the original eight plus migrated Kernel v3.3 and an EIP-7702-delegated EOA), four paymaster suites, legacy-4337 preservation, and both rollback paths |
+| `contracts/` — debug `forge test`, native `@future` build (no external artifact script) | 260 passed, 0 failed, 0 skipped across 15 suites; includes the account and paymaster matrices, legacy-4337 preservation, and both rollback paths |
 | `contracts/` — stock forge 1.7.1, `FOUNDRY_PROFILE=policy` | 14 passed, 0 failed |
-| `contracts/` — current native deployed-bytecode artifact lengths | `OwnerAccount` 579 B; `MultisigAccount` 726 B; `SessionKeyAccount` 1,537 B; `SponsoringPaymaster` 878 B; `MLDSAAccount` 918 B; `MLDSAPaymaster` 1,254 B |
+| `contracts/` — current native deployed-bytecode artifact lengths | `OwnerAccount` 579 B; `MultisigAccount` 726 B; `SessionKeyAccount` 1,537 B; `SponsoringPaymaster` 878 B |
 | `foundry-core` — `foundry-compilers-artifacts-solc` | 49 unit and 3 doc tests passed; one doc test intentionally ignored |
 | `revm` — `cargo test --workspace --all-targets` | Passed; one pre-existing flaky RPC test ignored; focused frame opcode tests 29/29 and handler tests 60/60 |
-| `foundry` — `foundry-primitives transaction::frame::tests --lib` | 30 passed, 0 failed |
+| `foundry` — `foundry-primitives transaction::frame::tests --lib` | 27 passed, 0 failed |
 | `foundry` — anvil `frame_tx` backend units | 44 passed, 0 failed |
-| `foundry` — anvil `frame_tx::` integrations | 31 passed, 0 failed; includes production P256 and ML-DSA raw envelopes plus multisig-owner/index-1 payer reuse |
+| `foundry` — anvil `frame_tx::` integrations | 30 passed, 0 failed; includes the production P256 raw envelope plus multisig-owner/index-1 payer reuse |
 | `foundry` — `cargo check -p anvil --lib` | Passed against the pinned REVM and foundry-core revisions |
 | `solidity` — solc/isoltest current-spec regression set | Patched solc built; exceptional-read optimizer 2/2, datacopy optimizer 4/4, dynamic frame gas 1/1, `SIGDATACOPY` gas 1/1, `@future` syntax/mutability 4/4, and Osaka rejection gate 1/1 passed |
 | `tools/check-spec-drift.sh` | Clean against `ethereum/EIPs@f767a1e8078e17c9b381a91d35a09492189ede1b` |

@@ -23,8 +23,7 @@ optimizer_runs = 200
 # trailer, no source-hash identity in the runtime.
 cbor_metadata = false
 bytecode_hash = "none"
-# The standalone Yul accounts are compiled manually (solc --strict-assembly);
-# their tests pin the resulting runtime bytes.
+# The remaining standalone Yul file is an operand-order compiler probe, not a contract target.
 skip = ["*.yul"]
 
 # Solar (forge's native Solidity frontend) has no knowledge of the fork's

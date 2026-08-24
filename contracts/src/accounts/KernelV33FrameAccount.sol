@@ -71,7 +71,7 @@ contract KernelV33FrameAccount is IFrameAccount {
             revert UnsupportedRootValidator();
         }
 
-        // Preserve the existing ECDSA root exactly. A P256 or ML-DSA entry that
+        // Preserve the existing ECDSA root exactly. A P256 entry that
         // happens to resolve to the same 20-byte value must not broaden policy.
         if (FrameTxLib.sigScheme(signatureIndex) != FrameTxLib.SCHEME_SECP256K1) {
             revert NoTrustedSignature();
