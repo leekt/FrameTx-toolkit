@@ -15,7 +15,7 @@ pins are recorded exactly in [VERSIONS.md](VERSIONS.md).
 > `5683db7dc79cace93363fe3465e20792b859bec9`. The real Kernel v3.3 migration fixture uses
 > official ZeroDev Kernel commit `cd697c7e21715d015e0643af22310a99aa17433b`. Foundry
 > promotion passed 27/27 primitives, 44/44 Anvil unit, and 30/30 Anvil integration tests;
-> the contract project passes 259/259 tests across 15 suites. The root gitlinks pin the
+> the contract project passes 301/301 tests across 17 suites. The root gitlinks pin the
 > toolchain forks, while [`contracts/soldeer.lock`](contracts/soldeer.lock) pins Kernel,
 > Solady, forge-std, and ExcessivelySafeCall. To inspect later primary-branch movement without
 > changing the toolchain pins, use
@@ -265,7 +265,7 @@ Paymaster implementations have the parallel
 four hooks provide the deployed paymaster, one trusted signature, scalar index-selecting
 calldata, and accepted max cost; inherited cases require sponsorship of all configured account targets:
 `OwnerAccount`, `MultisigAccount`, `SessionKeyAccount` through its owner, `P256Account`,
-`WebAuthnAccount`, the migrated Kernel
+`FrameKernel` through native P256, `WebAuthnAccount`, the migrated Kernel
 v3.3 proxy, and the EIP-7702-delegated EOA. Every case uses one shared, shifted signature
 envelope, and inherited negatives show that wrong supported signatures plus a
 malformed selected `ARBITRARY` sponsor signature are refused. Sender-specific signature policies can override
@@ -332,6 +332,7 @@ All under [`contracts/src/accounts`](contracts/src/accounts), each with notes in
 | `MultisigAccount.sol` | Account | k-of-n over protocol-verified signatures, with no signature parsing |
 | `SessionKeyAccount.sol` | Account | Cross-frame constraints for a delegated key, with expiry via the expiry verifier frame |
 | `P256Account.sol` | Account | Native protocol-verified P256 metadata, `keccak256(qx || qy)[12:]` signer identity, and self-call key rotation |
+| [`FrameKernel.sol`](contracts/src/accounts/FrameKernel.sol) | Account | Scheme-scoped native secp256k1/P256 authorities plus self-managed WebAuthn credentials whose compact assertions are verified as P256 at precompile `0x100` |
 | `WebAuthnAccount.sol` | Account | A strict WebAuthn assertion carried as an `ARBITRARY` witness and verified at precompile `0x100` |
 | [`KernelV33FrameAccount.sol`](contracts/src/accounts/KernelV33FrameAccount.sol) | Migration adapter | A 1,014-byte, storage-free compatibility shim for an unhooked Kernel v3.3 ECDSA root; it adds Frame validation and delegates the complete legacy surface to the exact prior implementation |
 | [`EOA7702FrameAccount.sol`](contracts/src/accounts/EOA7702FrameAccount.sol) | Migration adapter | Same-address EIP-7702 delegation with secp256k1-only Frame approval and plain ETH receipt |

@@ -105,6 +105,7 @@ The reusable paymaster matrix includes the account examples and both migration a
 | `MultisigAccount` | Threshold over selected native signers | Owners and threshold in storage |
 | `SessionKeyAccount` | Owner or frame-constrained session key | Policy in storage |
 | `P256Account` | Selected protocol-verified native P256 signer | Rotatable signer in storage |
+| [`FrameKernel`](src/accounts/FrameKernel.sol) | Scheme-scoped native secp256k1/P256 signer or compact WebAuthn assertion verified with P256VERIFY | Self-managed native signers and passkey credentials; exact slot-0 formatter layout with only the legacy address(1) native sentinel retained |
 | `WebAuthnAccount` | One selected, contract-verified `ARBITRARY` assertion | Immutable credential configuration |
 | [`KernelV33FrameAccount`](src/accounts/KernelV33FrameAccount.sol) | Existing, unhooked Kernel v3.3 ECDSA root after a same-address proxy upgrade | Existing Kernel/validator storage; the 1,014-byte compatibility shim adds no storage, rejects hooked roots, and delegates the complete legacy surface to the exact prior implementation |
 | [`EOA7702FrameAccount`](src/accounts/EOA7702FrameAccount.sol) | Existing EOA secp256k1 identity through EIP-7702 delegation | No adapter storage; EOA remains the authority |
@@ -153,9 +154,9 @@ trusted protocol signature, calldata selecting its authorization index, and an a
 max-cost fixture through `_paymasterUnderTest()`, `_paymasterTestSignature()`,
 `_paymasterTestCall(uint256)`, and `_paymasterTestMaxCost()`. Its shared, shifted signature
 envelope tests that the paymaster sponsors `OwnerAccount`, `MultisigAccount`,
-`SessionKeyAccount` through its owner, `P256Account`, `WebAuthnAccount`, the migrated Kernel
-v3.3 proxy, and the EIP-7702-delegated
-EOA, while refusing a misrouted paymaster index.
+`SessionKeyAccount` through its owner, `P256Account`, `FrameKernel` through native P256,
+`WebAuthnAccount`, the migrated Kernel v3.3 proxy, and the EIP-7702-delegated EOA, while
+refusing a misrouted paymaster index.
 `SponsoringPaymasterTest`, `P256PaymasterTest`, and `WebAuthnPaymasterTest` all inherit this
 matrix.
 Sender-specific signature policies can override `_preparePaymasterForAccount(address)` for

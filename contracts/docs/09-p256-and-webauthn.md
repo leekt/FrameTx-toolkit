@@ -73,9 +73,50 @@ a key carried by an actual native P256 signature is a valid curve point. Because
 The signer is not rotatable. This runtime is not the draft's canonical paymaster runtime, so
 the non-canonical paymaster rules apply.
 
+### `FrameKernel`: native P256 and compact WebAuthn P256
+
+[`FrameKernel.sol`](../src/accounts/FrameKernel.sol) combines native secp256k1, native P256,
+and passkey authorities behind the standard `validate(uint256)` account ABI. Native
+authorities are keyed by both scheme and resolved signer, so the same 20-byte identity under
+another curve does not inherit authority. The original address-valued slot-0
+`formatter(address)` mapping and getter remain intact. Only its old `address(1)` native-signer
+sentinel authorizes canonical native signatures under either supported scheme; legacy
+formatter contract addresses are neither called nor reinterpreted as native authority.
+
+| API | Behavior |
+|---|---|
+| `constructor(uint256 initialScheme, address initialSigner)` | Creates a usable standalone account with one native secp256k1 or P256 authority |
+| `validate(uint256 signatureIndex)` | Branches on the selected scheme, requires an empty `msg`, validates native metadata or a compact WebAuthn witness, then approves the current non-zero scope |
+| `setNativeSigner(uint256 scheme, address signer, bool trusted)` | Self-only native-authority configuration |
+| `migrateLegacySigner(uint256 scheme, address signer, bool trusted)` | Self-only clearing of a slot-0 sentinel or formatter value, optionally installing the signer for exactly one native scheme |
+| `setWebAuthnCredential(bytes32 qx, bytes32 qy, bytes32 rpIdHash, string origin, bool requireUserVerification)` | Self-only passkey configuration, keyed by `keccak256(qx || qy)[12:]` |
+| `removeWebAuthnCredential(address signer)` | Self-only passkey revocation |
+| `receive()` | Accepts ETH for self-payment or sponsor-only payment |
+
+The FrameKernel passkey entry is still scheme `ARBITRARY`, because WebAuthn does not sign the
+transaction hash directly. Its actual signature algorithm is P256 and is checked at
+P256VERIFY. The exact compact witness is:
+
+```solidity
+abi.encode(
+    address credentialSigner, // keccak256(qx || qy)[12:]
+    bytes32 r,
+    bytes32 s,
+    bytes authenticatorData   // exactly 37 bytes in this profile
+)
+```
+
+This encoding is exactly 224 bytes. It deliberately omits both the challenge and
+`clientDataJSON`. FrameKernel reconstructs the canonical JSON as
+`{"type":"webauthn.get","challenge":"<base64url(sigHash)>","origin":"<configured>","crossOrigin":false}`
+and then verifies `r/s` over `sha256(authenticatorData || sha256(clientDataJSON))`. The raw
+compact witness is elided from `compute_sig_hash(tx)`, so this reconstruction has no circular
+dependency. Invalid decoding, non-canonical ABI, the wrong credential, RP ID, origin,
+challenge, flags, UV policy, or P256 signature all fail closed.
+
 ## WebAuthn transaction entry
 
-Both [`WebAuthnAccount.sol`](../src/accounts/WebAuthnAccount.sol) and
+The standalone [`WebAuthnAccount.sol`](../src/accounts/WebAuthnAccount.sol) and
 [`WebAuthnPaymaster.sol`](../src/accounts/WebAuthnPaymaster.sol) receive one selected
 signature index directly. That entry must be:
 
@@ -254,14 +295,14 @@ This is also a non-canonical paymaster.
 
 ## Account roles and public-mempool status
 
-Both account implementations derive the current frame's `allowed_scope`, reject zero, and
+All three account profiles derive the current frame's `allowed_scope`, reject zero, and
 therefore support all three reusable account roles:
 
-| Role | Scope | `P256Account` | `WebAuthnAccount` |
-|---|---:|---|---|
-| Validate and pay for itself | `BOTH` (`0x03`) | Supported | Supported |
-| Validate while a later paymaster pays | `EXECUTION` (`0x02`) | Supported | Supported |
-| Sponsor another already-approved sender (payment only) | `PAYMENT` (`0x01`) | Supported in the EVM and through direct/private inclusion | Supported; immutable validation avoids a third-party SLOAD |
+| Role | Scope | `P256Account` | `FrameKernel` | `WebAuthnAccount` |
+|---|---:|---|---|---|
+| Validate and pay for itself | `BOTH` (`0x03`) | Supported | Supported | Supported |
+| Validate while a later paymaster pays | `EXECUTION` (`0x02`) | Supported | Supported | Supported |
+| Sponsor another already-approved sender (payment only) | `PAYMENT` (`0x01`) | Supported in the EVM and through direct/private inclusion | Supported in the EVM and through direct/private inclusion | Supported; immutable validation avoids a third-party SLOAD |
 
 The last WebAuthn cell is not a blanket public-mempool guarantee. When an account with code
 is used as a separate pay target, it is a non-canonical paymaster. Under the current draft it
@@ -270,15 +311,17 @@ validation trace, opcode, gas, balance-reservation, and structural rule. The ded
 `P256Paymaster` and `WebAuthnPaymaster` have the same non-canonical classification, as does
 any future post-quantum paymaster.
 
-`P256Account` is stricter: its pay-other validation reads `p256Signer` from storage outside
-the different `tx.sender`, which violates the public-pool trace rule. That role is still valid
-for direct execution or private inclusion.
+`P256Account` and `FrameKernel` are stricter: their pay-other validation reads mutable
+signer or credential policy from storage outside the different `tx.sender`, which violates
+the public-pool trace rule. That role is still valid for direct execution or private
+inclusion.
 
 ## Reusable test coverage
 
-[`AccountTestSuite.sol`](../test/AccountTestSuite.sol) is inherited by both account tests. It
-checks the three roles above, shifted selected indices, unselected-proof rejection, exact
-scope behavior, invalid selections, and ordinary ETH funding.
+[`AccountTestSuite.sol`](../test/AccountTestSuite.sol) is inherited by the standalone native
+P256 and WebAuthn tests and by FrameKernel's native-P256 and WebAuthn-P256 tests. It checks
+the three roles above, shifted selected indices, unselected-proof rejection, exact scope
+behavior, invalid selections, and ordinary ETH funding.
 
 [`PaymasterTestSuite.sol`](../test/PaymasterTestSuite.sol) is inherited by all three example
 paymaster tests: `SponsoringPaymasterTest`, `P256PaymasterTest`, and
@@ -289,9 +332,10 @@ shared signature envelope:
 2. `MultisigAccount`
 3. `SessionKeyAccount` through its owner path
 4. `P256Account`
-5. `WebAuthnAccount`
-6. Migrated Kernel v3.3 proxy
-7. EIP-7702-delegated EOA
+5. `FrameKernel` through its native-P256 authority
+6. `WebAuthnAccount`
+7. Migrated Kernel v3.3 proxy
+8. EIP-7702-delegated EOA
 
 The matrix appends the paymaster's single authorization entry after the account-specific
 prefix, computes its shifted scalar index dynamically, and includes a wrong-selected-index
@@ -347,7 +391,7 @@ This is a strict assertion verifier, not a relying-party implementation. It prov
 - credential ID, user-handle, transport, or discoverable-credential processing;
 - persistence of backup eligibility or backup state;
 - tolerant JSON parsing, origin normalization, or RP-ID derivation; or
-- WebAuthn account credential rotation.
+- standalone `WebAuthnAccount` credential rotation (FrameKernel credentials are mutable).
 
 Deployment code must obtain and validate the credential public key, RP ID, and origin through
 its own trusted registration flow, compute `rpIdHash = sha256(bytes(rpId))` and

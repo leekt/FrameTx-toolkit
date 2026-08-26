@@ -64,6 +64,14 @@ authenticator flags, constructors, and deliberate omissions are specified in
 P256 contracts require scheme `0x02`, and WebAuthn contracts require their exact
 scheme-`0x00` assertion.
 
+[`FrameKernel`](../contracts/src/accounts/FrameKernel.sol) supports both paths behind the
+same `validate(uint256)` entry point. Its native secp256k1 and P256 authorities use the
+protocol metadata directly. Its passkey witness remains an empty-`msg` `ARBITRARY` entry,
+but contains a real WebAuthn P256 signature. The compact witness omits challenge-dependent
+client JSON: the kernel reconstructs the canonical JSON from `TXPARAM(0x08)` and the
+credential's configured origin before calling P256VERIFY. This keeps P256 as the actual
+cryptography without putting self-referential assertion bytes in signed frame calldata.
+
 ## Post-quantum signatures use `ARBITRARY`
 
 EIP-8141 reserves schemes `0x03` through `0xff`; this toolkit does not assign one to
@@ -335,7 +343,7 @@ concrete paymaster test supplies `_paymasterUnderTest()`, `_paymasterTestSignatu
 `_paymasterTestCall(uint256)`, and `_paymasterTestMaxCost()`. The inherited matrix uses one
 shared, shifted signature envelope to require sponsorship of all configured targets:
 `OwnerAccount`, `MultisigAccount`, `SessionKeyAccount` through its owner, `P256Account`,
-`WebAuthnAccount`, the migrated Kernel
+`FrameKernel` through native P256, `WebAuthnAccount`, the migrated Kernel
 v3.3 proxy, and the EIP-7702-delegated EOA, plus refusal of a misrouted paymaster index. The
 matrix also refuses wrong secp256k1 and P256 sponsor signatures and a selected malformed
 `ARBITRARY` sponsor signature. The secp256k1, P256, and WebAuthn paymaster tests all inherit

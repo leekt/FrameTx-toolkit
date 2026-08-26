@@ -48,6 +48,7 @@ abstract contract PaymasterTestSuite is FrameTest {
     uint256 private constant WEBAUTHN_OTHER_CREDENTIAL_KEY =
         0x23456789abcdef123456789abcdef123456789abcdef123456789abcdef12345;
     uint256 private constant EOA_7702_AUTHORITY_KEY = 0x7702f00d;
+    uint256 private constant FRAME_KERNEL_P256_SCHEME = 2;
     uint256 private constant P256_N =
         0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551;
     string private constant WEBAUTHN_RP_ID = "wallet.example";
@@ -298,6 +299,25 @@ abstract contract PaymasterTestSuite is FrameTest {
         });
     }
 
+    function _frameKernelAccountCase() private returns (SponsoredAccountCase memory accountCase) {
+        address trustedSigner = _p256ResolvedSigner();
+        address account = deployAccountWithArgs(
+            "FrameKernel", abi.encode(FRAME_KERNEL_P256_SCHEME, trustedSigner)
+        );
+
+        // Exercise FrameKernel's native-P256 route here. Its compact WebAuthn-P256
+        // route is covered by FrameKernelWebAuthnTest using real P256 signatures.
+        IFrameVm.FrameTxSignature[] memory prefix = new IFrameVm.FrameTxSignature[](2);
+        prefix[0] = p256Sig(_differentFromPaymasterAnd(trustedSigner, 0xF256));
+        prefix[1] = p256Sig(trustedSigner);
+        accountCase = SponsoredAccountCase({
+            account: account,
+            signaturePrefix: prefix,
+            accountCallData: _singleAccountCall(1),
+            accountSignatureIndex: 1
+        });
+    }
+
     function _webAuthnClientData() private pure returns (bytes memory) {
         return abi.encodePacked(
             '{"type":"webauthn.get","challenge":"',
@@ -430,6 +450,16 @@ abstract contract PaymasterTestSuite is FrameTest {
             _sponsoredContext(accountCase),
             "P256 account must approve execution from synthetic scheme-2 signature index 1",
             "paymaster must sponsor the P256 account from shifted index 2"
+        );
+    }
+
+    function test_paymasterConformance_sponsorsFrameKernel() public {
+        SponsoredAccountCase memory accountCase = _frameKernelAccountCase();
+        _preparePaymasterForAccount(accountCase.account);
+        _assertAccountThenPaymasterApprove(
+            _sponsoredContext(accountCase),
+            "FrameKernel must approve execution from native P256 signature index 1",
+            "paymaster must sponsor FrameKernel from shifted index 2"
         );
     }
 

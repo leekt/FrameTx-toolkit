@@ -127,7 +127,7 @@ cd ../contracts
 ../foundry/target/release/forge test --allow-local-compiler
 ```
 
-The current project result is 259 passed, 0 failed, and 0 skipped across 15 suites. That
+The current project result is 301 passed, 0 failed, and 0 skipped across 17 suites. That
 includes the Kernel v3.3 factory/proxy migration, the same-address EIP-7702 migration, all
 three Frame account roles, both rollback paths, and sponsorship by all three example
 paymasters.
