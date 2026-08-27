@@ -126,7 +126,7 @@ exact REVM and foundry-core revisions listed above.
 
 | Suite | Result |
 |---|---|
-| `contracts/` — debug `forge test`, native `@future` build (no external artifact script) | 301 passed, 0 failed, 0 skipped across 17 suites; includes the account and paymaster matrices, legacy-4337 preservation, and both rollback paths |
+| `contracts/` — debug `forge test`, native `@future` build (no external artifact script) | 304 passed, 0 failed, 0 skipped across 17 suites; includes the account and paymaster matrices, legacy-4337 preservation, and both rollback paths |
 | `contracts/` — stock forge 1.7.1, `FOUNDRY_PROFILE=policy` | 14 passed, 0 failed |
 | `contracts/` — current native deployed-bytecode artifact lengths | `OwnerAccount` 579 B; `MultisigAccount` 726 B; `SessionKeyAccount` 1,537 B; `SponsoringPaymaster` 878 B |
 | `foundry-core` — `foundry-compilers-artifacts-solc` | 49 unit and 3 doc tests passed; one doc test intentionally ignored |

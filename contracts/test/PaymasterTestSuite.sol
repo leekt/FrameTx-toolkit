@@ -302,11 +302,11 @@ abstract contract PaymasterTestSuite is FrameTest {
     function _frameKernelAccountCase() private returns (SponsoredAccountCase memory accountCase) {
         address trustedSigner = _p256ResolvedSigner();
         address account = deployAccountWithArgs(
-            "FrameKernel", abi.encode(FRAME_KERNEL_P256_SCHEME, trustedSigner)
+            "FrameKernel", abi.encode(FRAME_KERNEL_P256_SCHEME, trustedSigner, address(0))
         );
 
-        // Exercise FrameKernel's native-P256 route here. Its compact WebAuthn-P256
-        // route is covered by FrameKernelWebAuthnTest using real P256 signatures.
+        // Exercise FrameKernel's native-P256 route here. Its WebAuthn formatter route
+        // is covered separately with real P256 signatures.
         IFrameVm.FrameTxSignature[] memory prefix = new IFrameVm.FrameTxSignature[](2);
         prefix[0] = p256Sig(_differentFromPaymasterAnd(trustedSigner, 0xF256));
         prefix[1] = p256Sig(trustedSigner);

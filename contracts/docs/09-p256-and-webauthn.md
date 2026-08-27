@@ -73,46 +73,106 @@ a key carried by an actual native P256 signature is a valid curve point. Because
 The signer is not rotatable. This runtime is not the draft's canonical paymaster runtime, so
 the non-canonical paymaster rules apply.
 
-### `FrameKernel`: native P256 and compact WebAuthn P256
+### `FrameKernel`: native authority plus formatted P256
 
-[`FrameKernel.sol`](../src/accounts/FrameKernel.sol) combines native secp256k1, native P256,
-and passkey authorities behind the standard `validate(uint256)` account ABI. Native
-authorities are keyed by both scheme and resolved signer, so the same 20-byte identity under
-another curve does not inherit authority. The original address-valued slot-0
-`formatter(address)` mapping and getter remain intact. Only its old `address(1)` native-signer
-sentinel authorizes canonical native signatures under either supported scheme; legacy
-formatter contract addresses are neither called nor reinterpreted as native authority.
+[`FrameKernel.sol`](../src/accounts/FrameKernel.sol) is deliberately unaware of WebAuthn.
+It has two generic lanes:
+
+- `validate(uint256)` accepts an empty-message, protocol-verified native secp256k1 or P256
+  entry from a scheme-scoped signer; and
+- `validate(uint256,bytes)` accepts an empty-message `ARBITRARY` proof, resolves the
+  signer's formatter from slot 0, obtains a digest through `STATICCALL`, and verifies that
+  digest against the proof's account-authorized P256 key.
+
+The original address-valued slot-0 `formatter(address)` mapping is the formatted-key
+registry. A nonzero, non-sentinel formatter authorizes formatted P256 proofs from
+`keccak256(qx || qy)[12:]`; `address(1)` retains only the legacy native-signer meaning.
+FrameKernel has no WebAuthn credential struct, RP ID, origin, UV setting, client-data parser,
+or WebAuthn-specific getter/setter.
 
 | API | Behavior |
 |---|---|
-| `constructor(uint256 initialScheme, address initialSigner)` | Creates a usable standalone account with one native secp256k1 or P256 authority |
-| `validate(uint256 signatureIndex)` | Branches on the selected scheme, requires an empty `msg`, validates native metadata or a compact WebAuthn witness, then approves the current non-zero scope |
+| `constructor(uint256 initialScheme, address initialSigner, IFormatter initialFormatter)` | Installs either one native authority (K1/P256 with a zero formatter) or one formatted P256 authority (`ARBITRARY` with a deployed formatter) |
+| `validate(uint256 signatureIndex)` | Requires a native scheme and empty `msg`, checks the scheme-scoped signer, and approves the current non-zero VERIFY-frame scope |
+| `validate(uint256 signatureIndex, bytes formatterData)` | Requires an empty-message `ARBITRARY` entry, resolves the P256-derived signer and formatter, obtains a nonzero digest through strict `STATICCALL`, verifies low-s P256 in the kernel, and approves the current scope |
 | `setNativeSigner(uint256 scheme, address signer, bool trusted)` | Self-only native-authority configuration |
-| `migrateLegacySigner(uint256 scheme, address signer, bool trusted)` | Self-only clearing of a slot-0 sentinel or formatter value, optionally installing the signer for exactly one native scheme |
-| `setWebAuthnCredential(bytes32 qx, bytes32 qy, bytes32 rpIdHash, string origin, bool requireUserVerification)` | Self-only passkey configuration, keyed by `keccak256(qx || qy)[12:]` |
-| `removeWebAuthnCredential(address signer)` | Self-only passkey revocation |
+| `setFormatter(address signer, IFormatter formatter)` | Self-only formatted-P256 installation, rotation, or revocation |
+| `migrateLegacySigner(uint256 scheme, address signer, bool trusted)` | Clears a slot-0 legacy value and optionally installs one exact native scheme |
 | `receive()` | Accepts ETH for self-payment or sponsor-only payment |
 
-The FrameKernel passkey entry is still scheme `ARBITRARY`, because WebAuthn does not sign the
-transaction hash directly. Its actual signature algorithm is P256 and is checked at
-P256VERIFY. The exact compact witness is:
+The generic formatted-P256 proof is canonical ABI:
 
 ```solidity
 abi.encode(
-    address credentialSigner, // keccak256(qx || qy)[12:]
     bytes32 r,
     bytes32 s,
-    bytes authenticatorData   // exactly 37 bytes in this profile
+    bytes32 qx,
+    bytes32 qy,
+    bytes formatterProof
 )
 ```
 
-This encoding is exactly 224 bytes. It deliberately omits both the challenge and
-`clientDataJSON`. FrameKernel reconstructs the canonical JSON as
-`{"type":"webauthn.get","challenge":"<base64url(sigHash)>","origin":"<configured>","crossOrigin":false}`
-and then verifies `r/s` over `sha256(authenticatorData || sha256(clientDataJSON))`. The raw
-compact witness is elided from `compute_sig_hash(tx)`, so this reconstruction has no circular
-dependency. Invalid decoding, non-canonical ABI, the wrong credential, RP ID, origin,
-challenge, flags, UV policy, or P256 signature all fail closed.
+The key and signature are not trusted metadata. FrameKernel derives
+`keccak256(qx || qy)[12:]`, requires a formatter installed for that exact key, and performs
+P256VERIFY itself. `formatterProof` is opaque to the kernel.
+
+[`IFormatter`](../src/formatters/IFormatter.sol) receives the canonical transaction hash,
+signed frame `formatterData`, the opaque proof tail, and the selected signature index. A
+formatter has no approval power and no key authority: it returns only the digest the kernel
+must verify. Its interface is `pure`; calls are `STATICCALL`, reverts and non-32-byte return
+data fail closed, return data is copied with a 33-byte cap, and a zero digest is rejected.
+The 2 KiB proof/data limits are deliberate validation-gas bounds.
+
+Installing a formatter is nevertheless a security-critical policy decision. The kernel can
+prove that an authorized key signed the returned digest, but it cannot prove that arbitrary
+formatter bytecode bound that digest to the supplied `sigHash`. Deployments should install
+reviewed, immutable formatter code; a constant-digest formatter would make one signature
+replayable across transactions.
+
+The new formatter ABI is intentionally incompatible with the short-lived pre-release
+`format(bytes32,bytes,uint256)` ABI. A deployment using that old slot-0 value must replace
+its formatter binding before using the formatted-P256 path in this runtime.
+
+### `WebAuthnFormatter`: a stateless formatter, not a validator
+
+[`WebAuthnFormatter.sol`](../src/formatters/WebAuthnFormatter.sol) owns no P256 key and never
+calls P256VERIFY. Its signed frame data is:
+
+```solidity
+abi.encode(
+    bytes clientDataPrefix, // ends with `"challenge":"`
+    bytes clientDataSuffix, // begins with the challenge's closing quote
+    uint256 typeIndex,
+    uint256 crossOriginIndex
+)
+```
+
+Both indices are byte offsets in the reconstructed `clientDataJSON`, matching the browser's
+reported client-data structure after the 43-byte challenge is inserted.
+
+The WebAuthn `authenticatorData` is the generic proof's opaque `formatterProof`. Keeping it
+there is essential: the signature counter and flags arrive only after the authenticator
+receives its challenge, so putting authenticator data in VERIFY-frame calldata would make
+the challenge self-referential. Empty-message `ARBITRARY` proof bytes are elided from
+`compute_sig_hash(tx)`, while the challenge-less client-data template remains signed frame
+calldata.
+
+The formatter inserts the unpadded base64url encoding of `sigHash` between the prefix and
+suffix, checks `"type":"webauthn.get"`, and requires both user presence and user
+verification. This default profile also requires `"crossOrigin":false` and rejects a
+`topOrigin` member. It then returns:
+
+```text
+sha256(authenticatorData || sha256(clientDataJSON))
+```
+
+FrameKernel verifies `r/s` over that digest with `qx/qy`. The formatter intentionally stores
+and authorizes nothing, and callers cannot weaken its UV rule through frame data. In
+particular it does not enforce an account-configured RP ID or origin; this profile relies on
+the authenticator's credential/RP scoping, while the exact client-data template is
+transaction-bound. Applications that require a different immutable WebAuthn structure or an
+onchain RP/origin check should install different reviewed pure formatter bytecode, without
+moving P256 key authority out of FrameKernel.
 
 ## WebAuthn transaction entry
 
@@ -312,14 +372,14 @@ validation trace, opcode, gas, balance-reservation, and structural rule. The ded
 any future post-quantum paymaster.
 
 `P256Account` and `FrameKernel` are stricter: their pay-other validation reads mutable
-signer or credential policy from storage outside the different `tx.sender`, which violates
+signer or formatter policy from storage outside the different `tx.sender`, which violates
 the public-pool trace rule. That role is still valid for direct execution or private
 inclusion.
 
 ## Reusable test coverage
 
 [`AccountTestSuite.sol`](../test/AccountTestSuite.sol) is inherited by the standalone native
-P256 and WebAuthn tests and by FrameKernel's native-P256 and WebAuthn-P256 tests. It checks
+P256 and WebAuthn tests and by FrameKernel's native-P256 and WebAuthn-formatter tests. It checks
 the three roles above, shifted selected indices, unselected-proof rejection, exact scope
 behavior, invalid selections, and ordinary ETH funding.
 
@@ -372,7 +432,7 @@ path; Amsterdam is intentionally not selected because its node-level state-gas r
 incompatible with the current frame-transaction profile.
 
 Forge uses that mapping automatically through `contracts/foundry.toml`. To execute a
-WebAuthn validator in patched Anvil, start it explicitly with:
+WebAuthn verification path in patched Anvil, start it explicitly with:
 
 ```bash
 foundry/target/debug/anvil --hardfork osaka --enable-frame-transactions
@@ -391,7 +451,7 @@ This is a strict assertion verifier, not a relying-party implementation. It prov
 - credential ID, user-handle, transport, or discoverable-credential processing;
 - persistence of backup eligibility or backup state;
 - tolerant JSON parsing, origin normalization, or RP-ID derivation; or
-- standalone `WebAuthnAccount` credential rotation (FrameKernel credentials are mutable).
+- standalone `WebAuthnAccount` credential rotation (FrameKernel stores no WebAuthn credential).
 
 Deployment code must obtain and validate the credential public key, RP ID, and origin through
 its own trusted registration flow, compute `rpIdHash = sha256(bytes(rpId))` and

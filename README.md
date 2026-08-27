@@ -15,7 +15,7 @@ pins are recorded exactly in [VERSIONS.md](VERSIONS.md).
 > `5683db7dc79cace93363fe3465e20792b859bec9`. The real Kernel v3.3 migration fixture uses
 > official ZeroDev Kernel commit `cd697c7e21715d015e0643af22310a99aa17433b`. Foundry
 > promotion passed 27/27 primitives, 44/44 Anvil unit, and 30/30 Anvil integration tests;
-> the contract project passes 301/301 tests across 17 suites. The root gitlinks pin the
+> the contract project passes 304/304 tests across 17 suites. The root gitlinks pin the
 > toolchain forks, while [`contracts/soldeer.lock`](contracts/soldeer.lock) pins Kernel,
 > Solady, forge-std, and ExcessivelySafeCall. To inspect later primary-branch movement without
 > changing the toolchain pins, use
@@ -62,12 +62,13 @@ cd contracts
 
 The project's default profile sets `evm_version = "@future"`, `experimental = true`, and
 `solc = "../solidity/build/solc/solc"`, so the patched forge compiles `src/accounts`,
-`src/frame`, and `src/eips` natively and rebuilds them like any other source. Tests etch
+`src/formatters`, `src/frame`, and `src/eips` natively and rebuilds them like any other
+source. Tests etch
 the resulting runtimes (`vm.getDeployedCode`) and drive them through the patched revm via
 the `setFrameTx` cheatcode. In this toolkit, `@future` executes as **Osaka**, the last
 pre-Amsterdam Ethereum profile. That activates the [EIP-7951 P256VERIFY
 precompile](https://eips.ethereum.org/EIPS/eip-7951) at `0x100`, which the WebAuthn
-validators need, without enabling Amsterdam's incompatible node-level state-gas rules.
+verification paths need, without enabling Amsterdam's incompatible node-level state-gas rules.
 
 For real signed type-`0x06` envelopes, receipts, and state gas, run the patched node:
 
@@ -76,7 +77,7 @@ foundry/target/debug/anvil --enable-frame-transactions   # plus --enable-eip7819
 ```
 
 That command is sufficient for the existing frame-transaction examples. To execute a
-WebAuthn validator, start Anvil with `--hardfork osaka` as well so precompile `0x100` is
+WebAuthn verification path, start Anvil with `--hardfork osaka` as well so precompile `0x100` is
 active. The repository does not yet claim a raw-transaction WebAuthn end-to-end test.
 
 **Coexisting with stock Foundry and solc:**
@@ -188,7 +189,7 @@ default payer path without compatible account code or delegation.
 | [`foundry/`](foundry/) | Submodule — `forge` with the frame cheatcodes and opt-in Anvil transaction path |
 | [`contracts/soldeer.lock`](contracts/soldeer.lock) | Exact Kernel v3.3, Solady, forge-std, and ExcessivelySafeCall package resolution; `forge soldeer install` restores them under `contracts/dependencies/` |
 | [`spec/EIP8141.md`](spec/EIP8141.md) | Current-master normative overlay and a non-normative tooling-fixture appendix |
-| [`contracts/`](contracts/) | The Foundry project: accounts in `src/accounts`, policy in `src/policy`, EIP helper libraries in `src/eips`, **all tests** in `test/` |
+| [`contracts/`](contracts/) | The Foundry project: accounts in `src/accounts`, digest formatters in `src/formatters`, policy in `src/policy`, EIP helper libraries in `src/eips`, **all tests** in `test/` |
 | [`guides/`](guides/) | Build, write, and what does not work yet |
 | [`tools/check-spec-drift.sh`](tools/check-spec-drift.sh) | Detect whether the spec moved |
 
@@ -323,8 +324,10 @@ features.
 
 ## Accounts and paymasters
 
-All under [`contracts/src/accounts`](contracts/src/accounts), each with notes in
-[`contracts/docs`](contracts/docs) and tests in [`contracts/test`](contracts/test).
+Account and paymaster contracts live under
+[`contracts/src/accounts`](contracts/src/accounts); stateless digest formatters live under
+[`contracts/src/formatters`](contracts/src/formatters). Their notes and tests are in
+[`contracts/docs`](contracts/docs) and [`contracts/test`](contracts/test).
 
 | Contract | Kind | Demonstrates |
 |---|---|---|
@@ -332,7 +335,7 @@ All under [`contracts/src/accounts`](contracts/src/accounts), each with notes in
 | `MultisigAccount.sol` | Account | k-of-n over protocol-verified signatures, with no signature parsing |
 | `SessionKeyAccount.sol` | Account | Cross-frame constraints for a delegated key, with expiry via the expiry verifier frame |
 | `P256Account.sol` | Account | Native protocol-verified P256 metadata, `keccak256(qx || qy)[12:]` signer identity, and self-call key rotation |
-| [`FrameKernel.sol`](contracts/src/accounts/FrameKernel.sol) | Account | Scheme-scoped native secp256k1/P256 authorities plus self-managed WebAuthn credentials whose compact assertions are verified as P256 at precompile `0x100` |
+| [`FrameKernel.sol`](contracts/src/accounts/FrameKernel.sol) | Account | Scheme-scoped native authorities plus modular formatted-P256 keys; the kernel authorizes and verifies P256 while stateless formatters such as [`WebAuthnFormatter`](contracts/src/formatters/WebAuthnFormatter.sol) only produce the signed digest |
 | `WebAuthnAccount.sol` | Account | A strict WebAuthn assertion carried as an `ARBITRARY` witness and verified at precompile `0x100` |
 | [`KernelV33FrameAccount.sol`](contracts/src/accounts/KernelV33FrameAccount.sol) | Migration adapter | A 1,014-byte, storage-free compatibility shim for an unhooked Kernel v3.3 ECDSA root; it adds Frame validation and delegates the complete legacy surface to the exact prior implementation |
 | [`EOA7702FrameAccount.sol`](contracts/src/accounts/EOA7702FrameAccount.sol) | Migration adapter | Same-address EIP-7702 delegation with secp256k1-only Frame approval and plain ETH receipt |

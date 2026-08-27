@@ -30,7 +30,7 @@ the Soldeer lock pins official Kernel v3.3 at
 | `forge build` compiling `@future` sources natively | **Done** — refreshed foundry-core `f415f6fef0a62f44c7faa83daa8e37b14f0e009b` adds `EvmVersion::Future`; `evm_version = "@future"` plus `experimental = true` drive the patched solc over standard JSON |
 | Current-spec Foundry promotion | **Done** — 27/27 primitives, 44/44 Anvil unit, and 30/30 Anvil integration tests pass |
 | `setFrameTx` / `clearFrameTx` cheatcodes | **Done** |
-| `forge test` executing frame accounts | **Done** — 301/301 tests across 17 suites, including malformed/wrong signature refusal for supported paths, real Kernel v3.3 and EIP-7702 migration fixtures, all account roles, both rollback paths, and the paymaster matrix |
+| `forge test` executing frame accounts | **Done** — 304/304 tests across 17 suites, including malformed/wrong signature refusal for supported paths, real Kernel v3.3 and EIP-7702 migration fixtures, all account roles, both rollback paths, and the paymaster matrix |
 | anvil accepting baseline type `0x06` transactions | **Done** — explicit opt-in; decode, validate, and execute through the integration suite |
 | Post-quantum verification | Not shipped — ML-DSA must use an `ARBITRARY` witness and validation-frame/custom-verifier logic; no verifier, account, paymaster, or raw Anvil path is included |
 | Atomic batches and default code in anvil | **Done** — terminator rollback, mid-batch skip, signature-index selection all pinned |

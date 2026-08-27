@@ -64,13 +64,14 @@ authenticator flags, constructors, and deliberate omissions are specified in
 P256 contracts require scheme `0x02`, and WebAuthn contracts require their exact
 scheme-`0x00` assertion.
 
-[`FrameKernel`](../contracts/src/accounts/FrameKernel.sol) supports both paths behind the
-same `validate(uint256)` entry point. Its native secp256k1 and P256 authorities use the
-protocol metadata directly. Its passkey witness remains an empty-`msg` `ARBITRARY` entry,
-but contains a real WebAuthn P256 signature. The compact witness omits challenge-dependent
-client JSON: the kernel reconstructs the canonical JSON from `TXPARAM(0x08)` and the
-credential's configured origin before calling P256VERIFY. This keeps P256 as the actual
-cryptography without putting self-referential assertion bytes in signed frame calldata.
+[`FrameKernel`](../contracts/src/accounts/FrameKernel.sol) keeps native authorization on
+`validate(uint256)` and exposes `validate(uint256,bytes)` for formatted P256 proofs. The
+kernel derives the P256 signer, looks up that signer's formatter, and performs P256VERIFY
+itself. [`WebAuthnFormatter`](../contracts/src/formatters/WebAuthnFormatter.sol) is only a
+stateless digest formatter: it inserts `TXPARAM(0x08)` into a signed challenge-less
+client-data template and returns the WebAuthn message digest. The assertion signature,
+public key, and response-time authenticator data stay in the empty-`msg` `ARBITRARY` proof,
+so they are elided from the transaction signature hash and introduce no challenge cycle.
 
 ## Post-quantum signatures use `ARBITRARY`
 
@@ -275,7 +276,7 @@ The toolkit's Foundry fork executes `@future` as the pre-Amsterdam **Osaka** EVM
 intentional: Osaka activates [EIP-7951](https://eips.ethereum.org/EIPS/eip-7951)'s
 P256VERIFY precompile at `0x100`, while Amsterdam's node-level state-gas behavior is not
 compatible with the current frame profile. A patched Anvil must likewise use
-`--hardfork osaka --enable-frame-transactions` when executing a WebAuthn validator. There is
+`--hardfork osaka --enable-frame-transactions` when executing a WebAuthn verification path. There is
 not yet an Anvil WebAuthn end-to-end test in this repository. The native-P256 Anvil regression
 does submit a raw type-`0x06` transaction through `P256Account`, including a corrupted-key
 admission negative and mined payer, nonce, and SENDER-effect assertions.
