@@ -29,11 +29,6 @@ contract FrameKernel is IFrameAccount {
     /// @dev Slot 1. Direct protocol-verified authorities remain scheme-specific.
     mapping(uint256 scheme => mapping(address signer => bool trusted)) public nativeSigner;
 
-    /// @dev Slot 2 is intentionally never reused. A short-lived pre-release revision placed
-    ///      embedded credential state at this mapping namespace; leaving the linear slot
-    ///      reserved prevents a later variable from aliasing that dormant deployment data.
-    bytes32 private __reservedSlot2;
-
     struct FormattedP256Proof {
         bytes32 r;
         bytes32 s;
