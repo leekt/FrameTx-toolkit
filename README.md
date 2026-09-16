@@ -21,7 +21,11 @@ without FrameTx EIPs or patched tools:
 forge test --root vframe -vv
 ```
 
-It includes an owner account, a sponsor, and a deployment/relay demo. See the
+It includes SECP256K1/P256 owner accounts, a sponsor, a deterministic account factory,
+and a [web playground](web/README.md) for dragging, editing, simulating, and executing frames.
+The Sepolia example swaps Circle faucet USDC to ETH and spends it in an atomic group.
+The [Foundry deployment script](vframe/script/DeployVFrame.s.sol) calculates CREATE2 addresses
+and configures the web app automatically before deploying. See the
 [vFrame guide](vframe/README.md) for dependency setup, operation construction,
 and the differences from native protocol execution.
 

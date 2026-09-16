@@ -17,7 +17,7 @@ contract VFrameDefaultCaller {
     /// @dev Only the deploying EntryPoint may route calls. Return/revert data stays transparent.
     function executeFrame(address target, bytes calldata data) external {
         if (msg.sender != entryPoint) revert Unauthorized();
-        (bool success, bytes memory output) = VFrameCall.invoke(target, gasleft(), data, false);
+        (bool success, bytes memory output) = VFrameCall.invoke(target, gasleft(), data);
         assembly ("memory-safe") {
             if iszero(success) { revert(add(output, 32), mload(output)) }
             return(add(output, 32), mload(output))

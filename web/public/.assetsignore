@@ -1,0 +1,8 @@
+.env
+.env.*
+.git/**
+.openai/**
+.vite/**
+*.pem
+*.key
+*.map

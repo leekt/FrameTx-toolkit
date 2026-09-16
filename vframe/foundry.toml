@@ -14,6 +14,9 @@ optimizer = true
 optimizer_runs = 200
 cbor_metadata = false
 bytecode_hash = "none"
+create2_deployer = "0x4e59b44847b379578588920cA78FbF26c0B4956C"
+# The deployment script writes predicted addresses to web/.env.local before broadcasting.
+fs_permissions = [{ access = "read-write", path = "../web" }]
 
 [fmt]
 line_length = 100

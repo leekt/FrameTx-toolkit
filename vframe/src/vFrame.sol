@@ -1,16 +1,20 @@
 // SPDX-License-Identifier: CC0-1.0
 pragma solidity ^0.8.30;
 
-import {VFrameTypes as T, IVFrameValidator, IVFrameAccount} from "./IVFrame.sol";
+import {VFrameTypes as T, IVFrameAccount, IVFrameContext} from "./IVFrame.sol";
 import {VFrameCall} from "./VFrameCall.sol";
 import {VFrameDefaultCaller} from "./VFrameDefaultCaller.sol";
+import {VFrameECDSA} from "./VFrameECDSA.sol";
+import {VFrameP256} from "./VFrameP256.sol";
 
 /// @notice A contract-only frame execution harness for stock EVMs.
 /// @dev Test infrastructure: ABI envelopes, contract nonces and metered deposit payments.
 /// Gas, receipts and account authority remain those of an ordinary outer transaction.
-contract vFrame {
+contract vFrame is IVFrameContext {
     uint256 public constant MAX_FRAMES = 64;
+    bool public constant DEFAULT_EXECUTION_APPROVAL = true;
     uint256 public constant MAX_NONCE_KEYS = 16;
+    uint256 public constant MAX_SIGNATURES = 64;
     uint256 public constant MAX_FRAME_GAS = 10_000_000;
     uint256 public constant MAX_TRANSACTION_GAS = 16_777_216;
     // Allowance for deposit settlement, the final event, return encoding and lock cleanup.
@@ -24,16 +28,30 @@ contract vFrame {
     bytes32 private constant FRAME_TYPEHASH = keccak256(
         "Frame(uint8 mode,uint8 flags,address target,uint64 gasLimit,uint256 value,bytes data)"
     );
+    bytes32 private constant SIGNATURE_TYPEHASH =
+        keccak256("Signature(uint8 scheme,address signer,bytes32 message,bytes signature)");
+    bytes32 private constant CONTEXT_SLOT = keccak256("vFrame.context.v2");
     bytes32 private constant TRANSACTION_TYPEHASH = keccak256(
-        "Transaction(address sender,uint256[] nonceKeys,uint64 nonce,uint48 validUntil,uint64 overheadGasLimit,uint256 maxFeePerGas,uint256 maxPriorityFeePerGas,Frame[] frames)Frame(uint8 mode,uint8 flags,address target,uint64 gasLimit,uint256 value,bytes data)"
+        "Transaction(address sender,uint256[] nonceKeys,uint64 nonce,uint48 validUntil,uint64 overheadGasLimit,uint256 maxFeePerGas,uint256 maxPriorityFeePerGas,Frame[] frames,Signature[] signatures)Frame(uint8 mode,uint8 flags,address target,uint64 gasLimit,uint256 value,bytes data)Signature(uint8 scheme,address signer,bytes32 message,bytes signature)"
     );
 
     mapping(address account => uint256 balance) public deposits;
     mapping(address sender => mapping(uint256 key => uint64 sequence)) public nonces;
     bool private transient locked;
     address private transient executingSender;
+    bool private transient contextActive;
+    bool private transient senderApproved;
+    uint256 private transient currentFrameIndex;
 
     error ReentrantCall();
+    error NoActiveFrame();
+    error InvalidContextParameter(uint256 param);
+    error UnsupportedContextParameter(uint256 param);
+    error ContextIndexOutOfBounds(uint256 index);
+    error FrameNotCompleted(uint256 index);
+    error SignatureFieldUnavailable(uint256 index);
+    error InvalidSignature(uint256 index);
+    error UnsupportedSignatureScheme(uint8 scheme);
     error InvalidTransaction();
     error InvalidFrame(uint256 index);
     error NonceMismatch(uint256 key, uint64 expected, uint64 supplied);
@@ -99,15 +117,206 @@ contract vFrame {
         return locked && account != address(0) && executingSender == account;
     }
 
+    /// @notice Contract alternative to APPROVE(EXECUTION) during a DEFAULT frame.
+    /// @dev Only the sender, while it is the current frame's target, can grant authority.
+    /// Transient approval rolls back with the frame if its execution later reverts.
+    function approveExecution() external {
+        _requireContext();
+        uint256 base = 0x100 + currentFrameIndex * 16;
+        if (
+            senderApproved || msg.sender != address(uint160(_load(0x02)))
+                || msg.sender != address(uint160(_load(base))) || _load(base + 2) != T.DEFAULT
+                || _load(base + 3) & T.EXECUTION == 0
+        ) revert InvalidApproval(currentFrameIndex);
+        senderApproved = true;
+    }
+
+    /// @notice EIP-8141/EIP-8250 selectors for the active virtual transaction.
+    /// @dev Type is the virtual 0x06; hash and max cost use vFrame's ABI and gas model.
+    function txParam(uint256 param) external view returns (uint256) {
+        _requireContext();
+        if (param > 0x10) revert InvalidContextParameter(param);
+        // Ordinary contracts cannot read account-trie nonces or a native state-gas pool.
+        if (param == 0x0c || param == 0x0d) revert UnsupportedContextParameter(param);
+        if (param == 0x0a) return currentFrameIndex;
+        if (param == 0x05 || param == 0x07) return 0; // vFrame has no blob fields.
+        return _load(param);
+    }
+
+    /// @notice Inspect any frame's signed fields, or a completed frame's status.
+    /// @dev Native state limits and execution/state receipt gas are not modeled.
+    function frameParam(uint256 frameIndex, uint256 param) external view returns (uint256) {
+        _requireFrame(frameIndex);
+        if (param > 0x0b) revert InvalidContextParameter(param);
+        if ((param == 0x05 || param >= 0x0a) && frameIndex >= currentFrameIndex) {
+            revert FrameNotCompleted(frameIndex);
+        }
+        if (param >= 0x09) revert UnsupportedContextParameter(param);
+        uint256 base = 0x100 + frameIndex * 16;
+        if (param == 0x06) return _load(base + 3) & T.BOTH;
+        if (param == 0x07) return (_load(base + 3) >> 2) & 1;
+        return _load(base + param);
+    }
+
+    /// @notice SECP256K1/P256 signers are verified before any frame; ARBITRARY has no signer.
+    function sigParam(uint256 signatureIndex, uint256 param) external view returns (uint256) {
+        _requireSignature(signatureIndex);
+        if (param > 0x03) revert InvalidContextParameter(param);
+        uint256 base = 0x1000 + signatureIndex * 4;
+        bool arbitrary = _load(base + 1) == T.ARBITRARY;
+        if ((param == 0 && arbitrary) || (param == 3 && !arbitrary)) {
+            revert SignatureFieldUnavailable(signatureIndex);
+        }
+        return _load(base + param);
+    }
+
+    function frameData(uint256 frameIndex) external view returns (bytes memory) {
+        _requireFrame(frameIndex);
+        return _readData(0, frameIndex, _load(0x100 + frameIndex * 16 + 4));
+    }
+
+    /// @notice Signature bytes. ARBITRARY witnesses must be verified by the consuming account.
+    /// @dev Unlike native SIGDATACOPY, this harness exposes bytes for every scheme.
+    function signatureData(uint256 signatureIndex) external view returns (bytes memory) {
+        _requireSignature(signatureIndex);
+        return _readData(1, signatureIndex, _load(0x1000 + signatureIndex * 4 + 3));
+    }
+
+    function _requireContext() private view {
+        if (!contextActive) revert NoActiveFrame();
+    }
+
+    function _requireFrame(uint256 index) private view {
+        _requireContext();
+        if (index >= _load(0x09)) revert ContextIndexOutOfBounds(index);
+    }
+
+    function _requireSignature(uint256 index) private view {
+        _requireContext();
+        if (index >= _load(0x0b)) revert ContextIndexOutOfBounds(index);
+    }
+
+    function _store(uint256 key, uint256 value) private {
+        bytes32 base = CONTEXT_SLOT;
+        assembly ("memory-safe") { tstore(add(base, key), value) }
+    }
+
+    function _load(uint256 key) private view returns (uint256 value) {
+        bytes32 base = CONTEXT_SLOT;
+        assembly ("memory-safe") { value := tload(add(base, key)) }
+    }
+
+    function _dataKey(uint256 kind, uint256 index) private pure returns (uint256) {
+        return uint256(keccak256(abi.encode(CONTEXT_SLOT, kind, index)));
+    }
+
+    function _storeData(uint256 kind, uint256 index, bytes calldata data) private {
+        uint256 base = _dataKey(kind, index);
+        for (uint256 offset; offset < data.length; offset += 32) {
+            uint256 word;
+            assembly ("memory-safe") { word := calldataload(add(data.offset, offset)) }
+            uint256 remaining = data.length - offset;
+            // ABI padding need not be zero; never expose bytes beyond the declared length.
+            if (remaining < 32) word = (word >> ((32 - remaining) * 8)) << ((32 - remaining) * 8);
+            unchecked {
+                _store(base + offset / 32, word);
+            }
+        }
+    }
+
+    function _readData(uint256 kind, uint256 index, uint256 size)
+        private
+        view
+        returns (bytes memory data)
+    {
+        data = new bytes(size);
+        uint256 base = _dataKey(kind, index);
+        for (uint256 offset; offset < size; offset += 32) {
+            uint256 word;
+            unchecked {
+                word = _load(base + offset / 32);
+            }
+            assembly ("memory-safe") { mstore(add(add(data, 32), offset), word) }
+        }
+    }
+
+    function _openContext(T.Transaction calldata transaction, bytes32 hash, T.GasQuote memory quote)
+        private
+    {
+        _store(0x00, 0x06);
+        _store(0x01, transaction.nonce);
+        _store(0x02, uint160(transaction.sender));
+        _store(0x03, transaction.maxPriorityFeePerGas);
+        _store(0x04, transaction.maxFeePerGas);
+        _store(0x06, quote.maxCost);
+        _store(0x08, uint256(hash));
+        _store(0x09, transaction.frames.length);
+        _store(0x0b, transaction.signatures.length);
+        _store(0x0e, transaction.nonceKeys.length);
+        _store(
+            0x0f,
+            uint256(
+                keccak256(abi.encodePacked(transaction.nonceKeys.length, transaction.nonceKeys))
+            )
+        );
+        _store(0x10, transaction.nonceKeys[0]);
+        for (uint256 i; i < transaction.frames.length; ++i) {
+            T.Frame calldata frame = transaction.frames[i];
+            uint256 base = 0x100 + i * 16;
+            _store(base, uint160(_target(frame, transaction.sender)));
+            _store(base + 1, frame.gasLimit);
+            _store(base + 2, frame.mode);
+            _store(base + 3, frame.flags);
+            _store(base + 4, frame.data.length);
+            _store(base + 5, 0);
+            _store(base + 8, frame.value);
+            _storeData(0, i, frame.data);
+        }
+        for (uint256 i; i < transaction.signatures.length; ++i) {
+            T.Signature calldata sig = transaction.signatures[i];
+            uint256 base = 0x1000 + i * 4;
+            _store(base, uint160(sig.signer == address(0) ? transaction.sender : sig.signer));
+            _store(base + 1, sig.scheme);
+            _store(base + 2, uint256(sig.message));
+            _store(base + 3, sig.signature.length);
+            _storeData(1, i, sig.signature);
+        }
+        contextActive = true;
+    }
+
     function domainSeparator() public view returns (bytes32) {
         return keccak256(
             abi.encode(
-                DOMAIN_TYPEHASH, keccak256("vFrame"), keccak256("1"), block.chainid, address(this)
+                DOMAIN_TYPEHASH, keccak256("vFrame"), keccak256("2"), block.chainid, address(this)
             )
         );
     }
 
-    /// @notice EIP-712 hash bound to this deployment and chain. Witnesses are excluded.
+    function _validateSignatures(T.Transaction calldata transaction, bytes32 transactionHash)
+        private
+        view
+    {
+        for (uint256 i; i < transaction.signatures.length; ++i) {
+            T.Signature calldata sig = transaction.signatures[i];
+            if (sig.scheme == T.ARBITRARY) {
+                if (sig.signer != address(0)) revert InvalidSignature(i);
+                continue;
+            }
+            address signer = sig.signer == address(0) ? transaction.sender : sig.signer;
+            bytes32 digest = sig.message == bytes32(0) ? transactionHash : sig.message;
+            if (sig.scheme == T.SECP256K1) {
+                if (VFrameECDSA.recover(digest, sig.signature) != signer) {
+                    revert InvalidSignature(i);
+                }
+            } else if (sig.scheme == T.P256) {
+                if (!VFrameP256.verify(digest, sig.signature, signer)) revert InvalidSignature(i);
+            } else {
+                revert UnsupportedSignatureScheme(sig.scheme);
+            }
+        }
+    }
+
+    /// @notice EIP-712 hash bound to this deployment and chain. Canonical-hash witnesses are elided.
     function getTransactionHash(T.Transaction calldata transaction) public view returns (bytes32) {
         bytes32[] memory hashes = new bytes32[](transaction.frames.length);
         for (uint256 i; i < hashes.length; ++i) {
@@ -124,6 +333,19 @@ contract vFrame {
                 )
             );
         }
+        bytes32[] memory signatureHashes = new bytes32[](transaction.signatures.length);
+        for (uint256 i; i < signatureHashes.length; ++i) {
+            T.Signature calldata sig = transaction.signatures[i];
+            signatureHashes[i] = keccak256(
+                abi.encode(
+                    SIGNATURE_TYPEHASH,
+                    sig.scheme,
+                    sig.signer,
+                    sig.message,
+                    sig.message == bytes32(0) ? keccak256("") : keccak256(sig.signature)
+                )
+            );
+        }
         bytes32 contents = keccak256(
             abi.encode(
                 TRANSACTION_TYPEHASH,
@@ -134,23 +356,22 @@ contract vFrame {
                 transaction.overheadGasLimit,
                 transaction.maxFeePerGas,
                 transaction.maxPriorityFeePerGas,
-                keccak256(abi.encodePacked(hashes))
+                keccak256(abi.encodePacked(hashes)),
+                keccak256(abi.encodePacked(signatureHashes))
             )
         );
         return keccak256(abi.encodePacked("\x19\x01", domainSeparator(), contents));
     }
 
-    /// @notice Maximum reservation and capped reimbursement price for the current call context.
-    /// @dev Set gasPrice when using eth_call; an omitted/zero price produces a zero charge.
+    /// @notice Reserve at the signed upper price and clamp basefee to the signed price range.
+    /// @dev maxFeePerGas is the floor; maxPriorityFeePerGas is the allowance above it.
     function getGasQuote(T.Transaction calldata transaction)
         public
         view
         returns (T.GasQuote memory quote)
     {
         if (
-            transaction.overheadGasLimit < SETTLEMENT_GAS
-                || transaction.maxPriorityFeePerGas > transaction.maxFeePerGas
-                || transaction.maxFeePerGas < block.basefee || transaction.frames.length == 0
+            transaction.overheadGasLimit < SETTLEMENT_GAS || transaction.frames.length == 0
                 || transaction.frames.length > MAX_FRAMES
         ) revert InvalidGasParameters();
         quote.gasLimit = transaction.overheadGasLimit;
@@ -159,15 +380,18 @@ contract vFrame {
             if (limit == 0 || limit > MAX_FRAME_GAS) revert InvalidGasParameters();
             quote.gasLimit += limit;
         }
-        if (
-            quote.gasLimit > MAX_TRANSACTION_GAS
-                || transaction.maxFeePerGas > type(uint256).max / quote.gasLimit
-        ) revert InvalidGasParameters();
-        quote.maxCost = quote.gasLimit * transaction.maxFeePerGas;
-        uint256 tip = transaction.maxFeePerGas - block.basefee;
-        if (tip > transaction.maxPriorityFeePerGas) tip = transaction.maxPriorityFeePerGas;
-        quote.gasPrice = block.basefee + tip;
-        if (quote.gasPrice > tx.gasprice) quote.gasPrice = tx.gasprice;
+        if (transaction.maxPriorityFeePerGas > type(uint256).max - transaction.maxFeePerGas) {
+            revert InvalidGasParameters();
+        }
+        uint256 upperPrice = transaction.maxFeePerGas + transaction.maxPriorityFeePerGas;
+        if (quote.gasLimit > MAX_TRANSACTION_GAS || upperPrice > type(uint256).max / quote.gasLimit)
+        {
+            revert InvalidGasParameters();
+        }
+        quote.maxCost = quote.gasLimit * upperPrice;
+        quote.gasPrice = block.basefee;
+        if (quote.gasPrice < transaction.maxFeePerGas) quote.gasPrice = transaction.maxFeePerGas;
+        if (quote.gasPrice > upperPrice) quote.gasPrice = upperPrice;
     }
 
     /// @notice Relay one signed operation using a normal transaction, or preview its results with eth_call.
@@ -180,21 +404,24 @@ contract vFrame {
         _validateShape(transaction);
         T.GasQuote memory quote = getGasQuote(transaction);
         bytes32 transactionHash = getTransactionHash(transaction);
+        _validateSignatures(transaction, transactionHash);
+        _openContext(transaction, transactionHash, quote);
         results = new T.Result[](transaction.frames.length);
-        bool approved;
+        senderApproved = false;
         address payer;
 
         for (uint256 i; i < transaction.frames.length;) {
+            currentFrameIndex = i;
             T.Frame calldata frame = transaction.frames[i];
             if (frame.mode == T.VERIFY) {
-                uint8 scope = _validateFrame(transaction, transactionHash, quote, i);
+                uint8 scope = _validateFrame(transaction.sender, frame, i);
                 if (scope & T.EXECUTION != 0) {
-                    if (approved) revert InvalidApproval(i);
-                    approved = true;
+                    if (senderApproved) revert InvalidApproval(i);
+                    senderApproved = true;
                 }
                 if (scope & T.PAYMENT != 0) {
                     // A payer cannot consume another account's nonce without its approval.
-                    if (!approved) revert MissingExecutionApproval(i);
+                    if (!senderApproved) revert MissingExecutionApproval(i);
                     if (payer != address(0)) revert InvalidApproval(i);
                     payer = _target(frame, transaction.sender);
                     if (deposits[payer] < quote.maxCost) revert InsufficientDeposit(payer);
@@ -204,6 +431,7 @@ contract vFrame {
                     }
                 }
                 results[i].status = 1;
+                _store(0x100 + i * 16 + 5, 1);
                 ++i;
                 continue;
             }
@@ -211,18 +439,22 @@ contract vFrame {
             uint256 end = i;
             while (transaction.frames[end].flags & T.ATOMIC != 0) ++end;
             for (uint256 j = i; j <= end; ++j) {
-                if (transaction.frames[j].mode == T.SENDER && !approved) {
+                if (transaction.frames[j].mode == T.SENDER && !senderApproved) {
                     revert MissingExecutionApproval(j);
                 }
             }
             if (end == i) {
                 (bool success, bytes memory data) = _execute(transaction.sender, frame);
                 results[i] = T.Result(success ? 1 : 0, false, data);
+                _store(0x100 + i * 16 + 5, results[i].status);
             } else {
                 _executeGroup(transaction.sender, transaction.frames, i, end, results);
             }
             i = end + 1;
         }
+        contextActive = false;
+        senderApproved = false;
+        currentFrameIndex = 0;
         if (payer == address(0)) revert MissingPaymentApproval();
         for (uint256 i; i < results.length; ++i) {
             emit FrameResult(
@@ -260,7 +492,9 @@ contract vFrame {
         if (msg.sender != address(this) || !locked) revert OnlySelf();
         outputs = new bytes[](end - start + 1);
         for (uint256 i = start; i <= end; ++i) {
+            currentFrameIndex = i;
             (bool success, bytes memory data) = _execute(sender, frames[i]);
+            _store(0x100 + i * 16 + 5, success ? 1 : 0);
             if (!success) revert BatchReverted(i, data);
             outputs[i - start] = data;
         }
@@ -290,6 +524,10 @@ contract vFrame {
             }
             // Preserve the wrapper error (failed index plus bounded original revert data).
             results[failed].returnData = reason;
+            // The nested call rolled back its context writes as well as application state.
+            for (uint256 i = start; i <= end; ++i) {
+                _store(0x100 + i * 16 + 5, results[i].status);
+            }
         }
     }
 
@@ -309,36 +547,21 @@ contract vFrame {
             target = address(defaultCaller);
         }
         _requireGas(frame.gasLimit);
-        (bool success, bytes memory output) = VFrameCall.invoke(target, frame.gasLimit, data, false);
+        (bool success, bytes memory output) = VFrameCall.invoke(target, frame.gasLimit, data);
         executingSender = address(0);
         return (success, output);
     }
 
-    function _validateFrame(
-        T.Transaction calldata transaction,
-        bytes32 transactionHash,
-        T.GasQuote memory quote,
-        uint256 index
-    ) private returns (uint8 scope) {
-        T.Frame calldata frame = transaction.frames[index];
-        T.ValidationContext memory context = T.ValidationContext(
-            transactionHash,
-            transaction.sender,
-            quote.maxCost,
-            quote.gasPrice,
-            index,
-            frame.flags & T.BOTH
-        );
-        bytes memory input = abi.encodeCall(
-            IVFrameValidator.validateFrame,
-            (context, transaction.frames, transaction.authorizations[index])
-        );
+    function _validateFrame(address sender, T.Frame calldata frame, uint256 index)
+        private
+        returns (uint8 scope)
+    {
         _requireGas(frame.gasLimit);
         (bool success, bytes memory output) =
-            VFrameCall.invoke(_target(frame, transaction.sender), frame.gasLimit, input, true);
+            VFrameCall.invoke(_target(frame, sender), frame.gasLimit, frame.data);
         if (!success || output.length != 64) revert ValidationFailed(index, output);
         (bytes4 magic, uint8 approvedScope) = abi.decode(output, (bytes4, uint8));
-        if (magic != T.VALIDATION_MAGIC || approvedScope & ~context.allowedScope != 0) {
+        if (magic != T.VALIDATION_MAGIC || approvedScope & ~(frame.flags & T.BOTH) != 0) {
             revert InvalidApproval(index);
         }
         return approvedScope;
@@ -348,7 +571,7 @@ contract vFrame {
         uint256 count = transaction.frames.length;
         if (
             transaction.sender == address(0) || transaction.sender == address(this) || count == 0
-                || count > MAX_FRAMES || transaction.authorizations.length != count
+                || count > MAX_FRAMES || transaction.signatures.length > MAX_SIGNATURES
                 || transaction.nonceKeys.length == 0
                 || transaction.nonceKeys.length > MAX_NONCE_KEYS
                 || transaction.nonce == type(uint64).max
@@ -374,8 +597,8 @@ contract vFrame {
                 frame.mode > T.SENDER || frame.flags > 7 || frame.gasLimit == 0
                     || frame.gasLimit > MAX_FRAME_GAS || target == address(this)
                     || (frame.mode != T.SENDER && frame.value != 0)
-                    || (frame.mode != T.VERIFY
-                        && (frame.flags & T.BOTH != 0 || transaction.authorizations[i].length != 0))
+                    || (frame.mode == T.SENDER && frame.flags & T.BOTH != 0)
+                    || (frame.mode == T.DEFAULT && frame.flags & T.PAYMENT != 0)
                     || (frame.flags & T.EXECUTION != 0 && target != transaction.sender)
                     || (atomic
                         && (frame.mode == T.VERIFY

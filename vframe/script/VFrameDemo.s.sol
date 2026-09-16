@@ -4,7 +4,7 @@ pragma solidity ^0.8.30;
 import {Script, console2} from "forge-std/Script.sol";
 import {vFrame} from "../src/vFrame.sol";
 import {VFrameAccount} from "../src/VFrameAccount.sol";
-import {VFrameTypes as T} from "../src/IVFrame.sol";
+import {VFrameTypes as T, IVFrameValidator} from "../src/IVFrame.sol";
 
 contract VFrameCounter {
     uint256 public number;
@@ -19,7 +19,7 @@ contract VFrameCounter {
 }
 
 /// @notice Deploys a fresh demo and relays an owner-signed operation using normal transactions.
-/// @dev The relayer funds deployments plus a 0.01 ETH deposit. The owner needs no ETH.
+/// @dev The relayer funds deployments plus 0.01 ETH held by the account. The owner needs no ETH.
 contract VFrameDemo is Script {
     function run() external {
         uint256 ownerKey = vm.envUint("VFRAME_OWNER_KEY");
@@ -28,7 +28,8 @@ contract VFrameDemo is Script {
         vFrame entryPoint = new vFrame();
         VFrameAccount account = new VFrameAccount(entryPoint, vm.addr(ownerKey));
         VFrameCounter counter = new VFrameCounter();
-        entryPoint.depositTo{value: 0.01 ether}(address(account));
+        (bool funded,) = address(account).call{value: 0.01 ether}("");
+        require(funded, "account funding failed");
         vm.stopBroadcast();
 
         T.Transaction memory transaction;
@@ -39,18 +40,28 @@ contract VFrameDemo is Script {
         transaction.maxPriorityFeePerGas = 1 gwei;
         transaction.maxFeePerGas = 2 * block.basefee + transaction.maxPriorityFeePerGas;
         transaction.frames = new T.Frame[](3);
-        transaction.frames[0] = T.Frame(T.VERIFY, T.BOTH, address(0), 200_000, 0, "");
+        transaction.frames[0] = T.Frame(
+            T.VERIFY,
+            T.BOTH,
+            address(0),
+            200_000,
+            0,
+            abi.encodeCall(IVFrameValidator.validateFrame, (abi.encode(uint256(0))))
+        );
         transaction.frames[1] = T.Frame(
             T.SENDER, 0, address(counter), 200_000, 0, abi.encodeCall(VFrameCounter.increment, ())
         );
         transaction.frames[2] = T.Frame(
             T.DEFAULT, 0, address(counter), 200_000, 0, abi.encodeCall(VFrameCounter.increment, ())
         );
-        transaction.authorizations = new bytes[](3);
+        transaction.signatures = new T.Signature[](1);
+        transaction.signatures[0].scheme = T.SECP256K1;
+        transaction.signatures[0].signer = vm.addr(ownerKey);
         (uint8 v, bytes32 r, bytes32 s) =
             vm.sign(ownerKey, entryPoint.getTransactionHash(transaction));
-        transaction.authorizations[0] = abi.encodePacked(r, s, v);
+        transaction.signatures[0].signature = abi.encodePacked(uint8(v - 27), r, s);
 
+        require(entryPoint.deposits(address(account)) == 0, "expected no prefunded deposit");
         vm.startBroadcast(relayerKey);
         // Reserve the signed call budgets, not just the gas actually used in simulation.
         entryPoint.handle{gas: 1_000_000}(transaction);
@@ -67,7 +78,10 @@ contract VFrameDemo is Script {
         require(
             charge <= entryPoint.getGasQuote(transaction).maxCost, "charge exceeded reservation"
         );
-        require(entryPoint.deposits(address(account)) + charge == 0.01 ether, "unbalanced payment");
+        require(
+            address(account).balance + entryPoint.deposits(address(account)) + charge == 0.01 ether,
+            "unbalanced payment"
+        );
         console2.log("vFrame:", address(entryPoint));
         console2.log("DEFAULT caller:", address(entryPoint.defaultCaller()));
         console2.log("Account:", address(account));

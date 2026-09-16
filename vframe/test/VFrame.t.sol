@@ -50,40 +50,32 @@ contract PolicyValidator is IVFrameValidator {
         allowedTarget = allowedTarget_;
     }
 
-    function validateFrame(
-        T.ValidationContext calldata context,
-        T.Frame[] calldata frames,
-        bytes calldata
-    ) external view returns (bytes4, uint8) {
-        require(keccak256(frames[context.frameIndex].data) == keccak256("policy"), "policy data");
-        for (uint256 i; i < frames.length; ++i) {
-            if (frames[i].mode == T.SENDER) {
-                require(frames[i].target == allowedTarget, "target denied");
+    function validateFrame(bytes calldata data) external view returns (bytes4, uint8) {
+        vFrame ep = vFrame(msg.sender);
+        require(keccak256(data) == keccak256("policy"), "policy data");
+        for (uint256 i; i < ep.txParam(0x09); ++i) {
+            if (ep.frameParam(i, 0x02) == T.SENDER) {
+                require(address(uint160(ep.frameParam(i, 0x00))) == allowedTarget, "target denied");
             }
         }
         return (T.VALIDATION_MAGIC, 0);
     }
 }
 
-// Deliberately not marked view: the EntryPoint must enforce STATICCALL itself.
+// A custom validation selector demonstrates raw mutable VERIFY dispatch.
 contract StatefulValidator {
     uint256 public writes;
 
-    function validateFrame(T.ValidationContext calldata context, T.Frame[] calldata, bytes calldata)
-        external
-        returns (bytes4, uint8)
-    {
-        ++writes;
-        return (T.VALIDATION_MAGIC, context.allowedScope);
+    function checkAndWrite(uint256 next) external returns (bytes4, uint8) {
+        vFrame ep = vFrame(msg.sender);
+        require(ep.frameParam(ep.txParam(0x0a), 0x02) == T.VERIFY, "mode");
+        writes = next;
+        return (T.VALIDATION_MAGIC, 0);
     }
 }
 
 contract BadScopeValidator is IVFrameValidator {
-    function validateFrame(T.ValidationContext calldata, T.Frame[] calldata, bytes calldata)
-        external
-        pure
-        returns (bytes4, uint8)
-    {
+    function validateFrame(bytes calldata) external pure returns (bytes4, uint8) {
         return (T.VALIDATION_MAGIC, T.BOTH);
     }
 }
@@ -103,13 +95,15 @@ contract GasPolicyValidator is IVFrameValidator {
         expectedDeposit = deposit;
     }
 
-    function validateFrame(T.ValidationContext calldata context, T.Frame[] calldata, bytes calldata)
-        external
-        view
-        returns (bytes4, uint8)
-    {
+    function validateFrame(bytes calldata) external view returns (bytes4, uint8) {
         require(msg.sender == address(entryPoint), "caller");
-        require(context.maxCost == expectedMaxCost && context.gasPrice == expectedGasPrice, "quote");
+        require(entryPoint.txParam(0x06) == expectedMaxCost, "reservation quote");
+        uint256 lower = entryPoint.txParam(0x04);
+        uint256 upper = lower + entryPoint.txParam(0x03);
+        uint256 price = block.basefee;
+        if (price < lower) price = lower;
+        if (price > upper) price = upper;
+        require(price == expectedGasPrice, "gas price");
         require(entryPoint.deposits(payer) == expectedDeposit - expectedMaxCost, "reservation");
         return (T.VALIDATION_MAGIC, 0);
     }
@@ -149,6 +143,7 @@ contract VFrameTest is Test {
         pure
         returns (T.Frame memory)
     {
+        if (mode == T.VERIFY) data = abi.encodeCall(IVFrameValidator.validateFrame, (data));
         return T.Frame(mode, flags, target, 200_000, 0, data);
     }
 
@@ -160,7 +155,7 @@ contract VFrameTest is Test {
         transaction.maxFeePerGas = MAX_FEE_PER_GAS;
         transaction.maxPriorityFeePerGas = 1 gwei;
         transaction.frames = new T.Frame[](count);
-        transaction.authorizations = new bytes[](count);
+        transaction.signatures = new T.Signature[](count);
         transaction.frames[0] = _frame(T.VERIFY, T.BOTH, address(0), "");
         for (uint256 i = 1; i < count; ++i) {
             transaction.frames[i] =
@@ -169,8 +164,19 @@ contract VFrameTest is Test {
     }
 
     function _sign(T.Transaction memory transaction, uint256 index, uint256 key) internal view {
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(key, entryPoint.getTransactionHash(transaction));
-        transaction.authorizations[index] = abi.encodePacked(r, s, v);
+        transaction.frames[index].data =
+            abi.encodeCall(IVFrameValidator.validateFrame, (abi.encode(index)));
+        transaction.signatures[index].scheme = T.SECP256K1;
+        transaction.signatures[index].signer = vm.addr(key);
+        // Metadata is signed: adding another signer re-signs the existing test signers too.
+        bytes32 digest = entryPoint.getTransactionHash(transaction);
+        for (uint256 i; i < transaction.signatures.length; ++i) {
+            T.Signature memory sig = transaction.signatures[i];
+            if (sig.scheme != T.SECP256K1) continue;
+            uint256 signerKey = sig.signer == vm.addr(OWNER_KEY) ? OWNER_KEY : SPONSOR_KEY;
+            (uint8 v, bytes32 r, bytes32 ss) = vm.sign(signerKey, digest);
+            transaction.signatures[i].signature = abi.encodePacked(uint8(v - 27), r, ss);
+        }
     }
 
     function _handle(T.Transaction memory transaction) internal returns (T.Result[] memory) {
@@ -223,8 +229,8 @@ contract VFrameTest is Test {
         T.Transaction memory transaction = _transaction(2);
         T.GasQuote memory quote = entryPoint.getGasQuote(transaction);
         assertEq(quote.gasLimit, 600_000);
-        assertEq(quote.maxCost, 600_000 * MAX_FEE_PER_GAS);
-        assertEq(quote.gasPrice, 2 gwei);
+        assertEq(quote.maxCost, 600_000 * (MAX_FEE_PER_GAS + 1 gwei));
+        assertEq(quote.gasPrice, 3 gwei);
         _sign(transaction, 0, OWNER_KEY);
         vm.recordLogs();
         _handle(transaction);
@@ -282,15 +288,18 @@ contract VFrameTest is Test {
         assertEq(entryPoint.nonces(address(account), 0), 1);
     }
 
-    function test_feeCapsBoundActualPriceWithoutOverchargingCheapRelay() public {
+    function test_baseFeeIsClampedToSignedRangeIndependentOfOuterPrice() public {
         T.Transaction memory transaction = _transaction(2);
         vm.txGasPrice(100 gwei);
-        assertEq(entryPoint.getGasQuote(transaction).gasPrice, 2 gwei);
-        vm.fee(2.5 gwei);
         assertEq(entryPoint.getGasQuote(transaction).gasPrice, 3 gwei);
-        vm.fee(1 gwei);
+        vm.fee(3.5 gwei);
+        assertEq(entryPoint.getGasQuote(transaction).gasPrice, 3.5 gwei);
+        vm.fee(5 gwei);
+        assertEq(entryPoint.getGasQuote(transaction).gasPrice, 4 gwei);
         vm.txGasPrice(1.5 gwei);
-        assertEq(entryPoint.getGasQuote(transaction).gasPrice, 1.5 gwei);
+        assertEq(entryPoint.getGasQuote(transaction).gasPrice, 4 gwei);
+        vm.txGasPrice(0);
+        assertEq(entryPoint.getGasQuote(transaction).gasPrice, 4 gwei);
         _sign(transaction, 0, OWNER_KEY);
         vm.recordLogs();
         _handle(transaction);
@@ -299,13 +308,10 @@ contract VFrameTest is Test {
 
     function test_invalidGasParametersAndReservationOverflowAreRejected() public {
         T.Transaction memory transaction = _transaction(1);
-        transaction.maxPriorityFeePerGas = MAX_FEE_PER_GAS + 1;
+        transaction.maxPriorityFeePerGas = type(uint256).max;
         vm.expectRevert(vFrame.InvalidGasParameters.selector);
         _handle(transaction);
         transaction.maxPriorityFeePerGas = 1 gwei;
-        transaction.maxFeePerGas = block.basefee - 1;
-        vm.expectRevert(vFrame.InvalidGasParameters.selector);
-        _handle(transaction);
         transaction.maxFeePerGas = type(uint256).max;
         vm.expectRevert(vFrame.InvalidGasParameters.selector);
         _handle(transaction);
@@ -319,9 +325,48 @@ contract VFrameTest is Test {
         _assertUncharged(0);
     }
 
+    function test_relayerCanAcceptReimbursementBelowBaseFee() public {
+        T.Transaction memory transaction = _transaction(2);
+        transaction.maxFeePerGas = 0.1 gwei;
+        transaction.maxPriorityFeePerGas = 0;
+        assertLt(transaction.maxFeePerGas, block.basefee);
+        assertEq(entryPoint.getGasQuote(transaction).gasPrice, 0.1 gwei);
+        _sign(transaction, 0, OWNER_KEY);
+        vm.recordLogs();
+        T.Result[] memory results = _handle(transaction);
+        assertEq(results[1].status, 1);
+        _assertSettlement(transaction, address(account), 2 ether);
+    }
+
+    function test_relayerCanAcceptZeroReimbursement() public {
+        T.Transaction memory transaction = _transaction(2);
+        transaction.maxFeePerGas = 0;
+        transaction.maxPriorityFeePerGas = 0;
+        _sign(transaction, 0, OWNER_KEY);
+        vm.recordLogs();
+        T.Result[] memory results = _handle(transaction);
+        assertEq(results[1].status, 1);
+        _assertSettlement(transaction, address(account), 2 ether);
+        assertEq(entryPoint.deposits(RELAYER), 0);
+        assertEq(entryPoint.nonces(address(account), 0), 1);
+    }
+
+    function test_priorityAllowanceMayExceedThePriceFloor() public {
+        T.Transaction memory transaction = _transaction(2);
+        transaction.maxFeePerGas = 0;
+        transaction.maxPriorityFeePerGas = 2 gwei;
+        T.GasQuote memory quote = entryPoint.getGasQuote(transaction);
+        assertEq(quote.gasPrice, 1 gwei);
+        assertEq(quote.maxCost, quote.gasLimit * 2 gwei);
+        _sign(transaction, 0, OWNER_KEY);
+        vm.recordLogs();
+        _handle(transaction);
+        _assertSettlement(transaction, address(account), 2 ether);
+    }
+
     function test_measuredGasCannotExceedSignedAggregateBudget() public {
         T.Transaction memory transaction = _transaction(1);
-        transaction.frames[0].gasLimit = 20_000;
+        transaction.frames[0].gasLimit = 40_000;
         transaction.overheadGasLimit = uint64(entryPoint.SETTLEMENT_GAS());
         _sign(transaction, 0, OWNER_KEY);
         vm.expectPartialRevert(vFrame.GasBudgetExceeded.selector);
@@ -345,7 +390,8 @@ contract VFrameTest is Test {
         assertTrue(results[1].rolledBack);
         assertEq(results[2].status, 2);
         assertEq(results[3].status, 2);
-        uint256 gasCharged = entryPoint.deposits(RELAYER) / 2 gwei;
+        uint256 gasCharged =
+            entryPoint.deposits(RELAYER) / entryPoint.getGasQuote(transaction).gasPrice;
         assertGt(gasCharged, 80_000);
         assertLt(gasCharged, 500_000);
         assertEq(entryPoint.nonces(address(account), 0), 1);
@@ -542,13 +588,13 @@ contract VFrameTest is Test {
 
     function test_signatureBoundToChainAndEntryPoint() public {
         T.Transaction memory transaction = _transaction(2);
-        bytes32 hash = entryPoint.getTransactionHash(transaction);
         _sign(transaction, 0, OWNER_KEY);
+        bytes32 hash = entryPoint.getTransactionHash(transaction);
         vFrame second = new vFrame();
         assertNotEq(second.getTransactionHash(transaction), hash);
         vm.chainId(block.chainid + 1);
         assertNotEq(entryPoint.getTransactionHash(transaction), hash);
-        vm.expectPartialRevert(vFrame.ValidationFailed.selector);
+        vm.expectPartialRevert(vFrame.InvalidSignature.selector);
         _handle(transaction);
         _assertUncharged(0);
     }
@@ -557,19 +603,19 @@ contract VFrameTest is Test {
         T.Transaction memory transaction = _transaction(2);
         _sign(transaction, 0, OWNER_KEY);
         transaction.frames[1].data = abi.encodeCall(Probe.write, (999));
-        vm.expectPartialRevert(vFrame.ValidationFailed.selector);
+        vm.expectPartialRevert(vFrame.InvalidSignature.selector);
         _handle(transaction);
         transaction.frames[1].data = abi.encodeCall(Probe.write, (1));
         transaction.maxFeePerGas += 1;
-        vm.expectPartialRevert(vFrame.ValidationFailed.selector);
+        vm.expectPartialRevert(vFrame.InvalidSignature.selector);
         _handle(transaction);
         transaction.maxFeePerGas -= 1;
         transaction.maxPriorityFeePerGas += 1;
-        vm.expectPartialRevert(vFrame.ValidationFailed.selector);
+        vm.expectPartialRevert(vFrame.InvalidSignature.selector);
         _handle(transaction);
         transaction.maxPriorityFeePerGas -= 1;
         transaction.overheadGasLimit += 1;
-        vm.expectPartialRevert(vFrame.ValidationFailed.selector);
+        vm.expectPartialRevert(vFrame.InvalidSignature.selector);
         _handle(transaction);
         _assertUncharged(0);
     }
@@ -584,15 +630,16 @@ contract VFrameTest is Test {
         _assertUncharged(0);
     }
 
-    function test_validationUsesRealStaticcall() public {
+    function test_validationUsesRawCallAndAllowsStateChanges() public {
         StatefulValidator validator = new StatefulValidator();
         T.Transaction memory transaction = _transaction(2);
         transaction.frames[1] = _frame(T.VERIFY, 0, address(validator), "");
+        transaction.frames[1].data = abi.encodeCall(StatefulValidator.checkAndWrite, (42));
         _sign(transaction, 0, OWNER_KEY);
-        vm.expectPartialRevert(vFrame.ValidationFailed.selector);
-        _handle(transaction);
-        assertEq(validator.writes(), 0);
-        _assertUncharged(0);
+        T.Result[] memory result = _handle(transaction);
+        assertEq(result[1].status, 1);
+        assertEq(validator.writes(), 42);
+        _assertCharged(address(account));
     }
 
     function test_validatorCanInspectSignedFramesAndPolicyData() public {
@@ -851,13 +898,11 @@ contract VFrameTest is Test {
         _assertUncharged(0);
     }
 
-    function test_insufficientDepositRejectsApproval() public {
+    function test_insufficientFundsRejectsPrefunding() public {
         T.Transaction memory transaction = _transaction(1);
         transaction.maxFeePerGas = 10 ether;
         _sign(transaction, 0, OWNER_KEY);
-        vm.expectRevert(
-            abi.encodeWithSelector(vFrame.InsufficientDeposit.selector, address(account))
-        );
+        vm.expectPartialRevert(vFrame.ValidationFailed.selector);
         _handle(transaction);
         _assertUncharged(0);
     }
@@ -965,18 +1010,19 @@ contract VFrameTest is Test {
 
     function test_malleableAndMalformedSignaturesFailClosed() public {
         T.Transaction memory transaction = _transaction(1);
+        _sign(transaction, 0, OWNER_KEY);
         bytes32 digest = entryPoint.getTransactionHash(transaction);
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(OWNER_KEY, digest);
+        (uint8 v, bytes32 r, bytes32 ss) = vm.sign(OWNER_KEY, digest);
         uint256 order = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141;
-        transaction.authorizations[0] =
-            abi.encodePacked(r, bytes32(order - uint256(s)), uint8(v == 27 ? 28 : 27));
-        vm.expectPartialRevert(vFrame.ValidationFailed.selector);
+        transaction.signatures[0].signature =
+            abi.encodePacked(uint8(v == 27 ? 1 : 0), r, bytes32(order - uint256(ss)));
+        vm.expectPartialRevert(vFrame.InvalidSignature.selector);
         _handle(transaction);
-        transaction.authorizations[0] = abi.encodePacked(r, s, uint8(0));
-        vm.expectPartialRevert(vFrame.ValidationFailed.selector);
+        transaction.signatures[0].signature = abi.encodePacked(v, r, ss);
+        vm.expectPartialRevert(vFrame.InvalidSignature.selector);
         _handle(transaction);
-        transaction.authorizations[0] = hex"1234";
-        vm.expectPartialRevert(vFrame.ValidationFailed.selector);
+        transaction.signatures[0].signature = hex"1234";
+        vm.expectPartialRevert(vFrame.InvalidSignature.selector);
         _handle(transaction);
         _assertUncharged(0);
     }
@@ -985,7 +1031,7 @@ contract VFrameTest is Test {
         T.Transaction memory transaction = _transaction(2);
         bytes32 original = entryPoint.getTransactionHash(transaction);
         // Witnesses alone are deliberately not part of the signed hash.
-        transaction.authorizations[0] = abi.encode(amount);
+        transaction.signatures[0].signature = abi.encode(amount);
         assertEq(entryPoint.getTransactionHash(transaction), original);
         transaction.frames[1].value = uint256(amount) + 1;
         assertNotEq(entryPoint.getTransactionHash(transaction), original);
