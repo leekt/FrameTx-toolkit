@@ -1,14 +1,17 @@
+> Current source and support status: [spec baseline](../spec/README.md) and
+> [working-tree reproducibility](../VERSIONS.md#reproducibility-status).
+
 # Limitations and known divergences
 
 Read this before planning work on top of the toolkit. Some of these will change what you
 can attempt.
 
-## The big one: only the baseline wire path exists
+## Wire support and execution limits
 
-With `--enable-frame-transactions`, the patched Foundry commit accepts a baseline
-type-`0x06` envelope through Anvil's `eth_sendRawTransaction`, mines it, and executes its
-frames. This is a real local-node path, not a Go-only harness. It does not implement the
-EIP-8250/8272/7906-inspired fixture fields on the wire, public-mempool policy, or peer gossip.
+With `--enable-frame-transactions`, the local Foundry checkout accepts scalar EIP-8141
+and keyed EIP-8250 type-`0x06` envelopes through Anvil RPC. It mines and executes their
+frames. Canonical recent-root verification, raw POST_TX, public-pool policy and gossip
+remain incomplete.
 
 | Status | Component | Detail |
 |---|---|---|
@@ -16,26 +19,16 @@ EIP-8250/8272/7906-inspired fixture fields on the wire, public-mempool policy, o
 | Implemented | Frame receipts | Consensus receipt encoding and trie roots include the payer and ordered `[status, gas_used, logs]` frame results; RPC receipts expose these as `payer` and `frameReceipts`. |
 | Implemented | Expiry activation | Enabled nodes install the canonical verifier at `0x8141` after source replay, and memory/fork resets restore it. |
 | Missing | Ready post-quantum verifier | Schemes `0x03` through `0xff` remain reserved. ML-DSA would require an `ARBITRARY` witness plus validation-frame or custom-verifier code; no witness profile, verifier, account, paymaster, or raw Anvil path is shipped. |
-| Missing | Fixture-inspired wire/state integration | No keyed-nonce list/state, recent-root list/verification, trace construction, or `POST_TX` suffix execution. Keyed nonces are not exposed by the fixture; recent-root and trace values remain synthetic `setFrameTx` inputs only. |
+| Partial | Selected AA extensions | EIP-8250 wire/state bookkeeping is implemented. EIP-8272 has a verifier-frame encoder; canonical verifier execution remains pending. EIP-7906 trace construction and raw `POST_TX` are pending, and EIP-8298 is spec-only while its opcode is TBD. |
 | Missing | Prefix policy | The validation-prefix simulation and DoS rules from the spec are not implemented as a public transaction-pool admission policy. |
-| Partial | Sponsorship RPC path | A raw-RPC default-code sponsor is covered end to end; a contract `pay` frame and canonical-paymaster pool accounting are not. |
+| Partial | Sponsorship RPC path | Raw-RPC sponsorship is covered end to end for both a default-code EOA sponsor (signature index 1) and a code-bearing sponsor contract in the `pay` frame; canonical-paymaster pool accounting is not. |
 | Known divergence | Fee-field width | Upstream admits fee scalars below `2**256`. The Frame decoder represents them as 256-bit values, but the current Alloy/REVM transaction APIs are `u128`, so Foundry validation rejects any fee field above `u128::MAX`. |
 | Partial | EIP-7997 factory | Anvil already installs the exact deterministic-factory address and runtime. It is available independently of Glamsterdam and has nonce `0`, not the activation-state nonce `1`. |
-| Experimental opt-in | EIP-7819 `SETDELEGATE` | Solc `@future`, REVM, and explicit Anvil activation cover exact location/code, Prague gating, gas/refund, static mode, collision, clearing, nonce, warmth, reset, and immediate-effect behavior. |
-| Experimental opt-in | EIP-7851 code-controlled delegation | Solc `@future`, REVM, and explicit Ethereum-only Anvil activation cover both designation versions, redelegation, sender and authorization rejection, gas/static/revert behavior, simulations, impersonation, reset, and Frame coexistence. Opcode `0xf7` is a non-normative local assignment because upstream remains TBD. |
-| Experimental opt-in | EIP-8151 code-restricted ECRecover | Solc `@future`, REVM, and explicit Ethereum-only Foundry/Anvil activation cover exact raw-code eligibility, malformed input, output, gas, warmth, rollback, replay, overrides, access-list inference, reset, and EIP-7851 transitions. No named-fork activation or official EEST vectors exist. |
 | Missing | Networking | No frame-transaction gossip or blob-sidecar wrapper is implemented. |
 
-[VERSIONS.md](../VERSIONS.md#reproducibility-status) and the root gitlinks record this
-reproducible current-spec stack. The four toolchain forks publish it on their default
-branches: Solidity `develop` at `4c6c547d9a35b23807f421692ac65c35f26f3d54`, revm `main`
-at `21ace0ade666d99f3e1c6e95ba173972164d0ceb`, foundry-core `main` at
-`f415f6fef0a62f44c7faa83daa8e37b14f0e009b`, and Foundry `master` at
-`5683db7dc79cace93363fe3465e20792b859bec9`. The official Kernel v3.3 fixture is pinned at
-`cd697c7e21715d015e0643af22310a99aa17433b`. Foundry promotion passed 27/27 primitives,
-44/44 Anvil unit, and 30/30 Anvil integration tests. A fresh recursive clone checks out the
-exact toolchain revisions; `forge soldeer install` restores the locked Kernel fixture and its
-direct Solidity dependencies.
+[VERSIONS.md](../VERSIONS.md#reproducibility-status) distinguishes published gitlinks
+from this working-tree migration and records current checks. The locked Solidity
+dependencies are unchanged.
 
 ## Activation and execution profiles
 
@@ -44,26 +37,13 @@ profile only for Ethereum hard forks before Amsterdam. OP Stack, Tempo, Monad, a
 state-gas profiles reject type `0x06` at submission instead of allowing it to reach a
 partially compatible executor.
 
-EIP-7819 is separately disabled by default. `--enable-eip7819` activates opcode `0xf6` only
-under Prague-or-later rules; pre-Prague execution still halts as not activated. The flag does
-not enable Frame transactions, and `--enable-frame-transactions` does not enable EIP-7819.
-Solc exposes the matching `setdelegate(salt, target)` builtin only under experimental
-`@future`, because the draft still has no assigned compiler fork.
-
-EIP-7851 is also disabled by default. `--enable-eip7851` is accepted only on Anvil's canonical
-Ethereum execution profile and requires Prague-or-later rules. Solc exposes
-`setselfdelegate(target)` only under `@future`. The pinned EIP does not assign an opcode; this
-toolkit uses provisional `0xf7`, so emitted bytecode is not portable and must be regenerated
-when upstream assigns a byte. The EIP-7851 flag does not imply either EIP-7819 or Frame
-activation, though all three can coexist on the supported Ethereum profile.
-
 EIP-8151 is likewise disabled by default. `--enable-eip8151` requires Prague-or-later rules
 and Anvil's canonical Ethereum profile. It changes precompile `0x01` from a stateless ECRecover
 to a stateful raw-code check, so Foundry also exposes `enable_eip8151 = true` and the matching
 CLI flag on shared EVM options. The proposal has no assigned hard fork; Prague is the minimum
 toolkit execution baseline, not a claim of protocol inclusion. Solc classifies high-level
 `ecrecover` as `view` only under `@future` so purity analysis and SMT modeling account for this
-state dependency. This flag is independent of Frame, EIP-7819, and EIP-7851 activation.
+state dependency. This flag is independent of Frame activation.
 
 Only raw signed envelopes are accepted. Object-form requests containing `type: 0x6` or
 `frames` are rejected, so `eth_call` cannot accidentally reinterpret a Frame transaction as
@@ -167,8 +147,18 @@ a frame it also describes as a `STATICCALL`. The current pinned revm implementat
 the opcode's transaction-scoped approval update while ordinary state-changing opcodes remain
 blocked, making `APPROVE` the sole permitted mutation in a VERIFY frame.
 
-Other clients may diverge here until the authors clarify. If you are writing something that
-depends on the exact boundary, treat it as unsettled.
+The current specification explicitly grants this exception; it is not an unresolved
+conflict between `STATICCALL` and `APPROVE`. Ordinary state-changing instructions remain
+prohibited throughout VERIFY, including nested calls. The 2026-09-16 source review
+confirmed this requirement is unchanged.
+
+## Current wire compatibility
+
+The old integrated devnet envelope with flat fee fields and a trailing
+`recent_root_references` list is rejected. EIP-8250 now preserves the nested `fees` list;
+EIP-8272 uses leading verifier-frame calldata and adds no transaction field or opcode.
+Rebuild and re-sign old vectors. [spec/README.md](../spec/README.md) records the current
+payload, selectors, gas changes and implementation boundaries.
 
 ## Solidity-side gaps
 
@@ -180,27 +170,17 @@ depends on the exact boundary, treat it as unsettled.
   at the default EVM and 5039 at `@future`; version-inapplicable and semantic suites were
   skipped. EIP-8151's SMT fixtures compile, but this build has `USE_Z3=OFF` and no Z3/cvc5, so
   solver assertions were not run. Syntax, view/pure, gas, object-compiler, side-effect, and
-  Yul-interpreter EIP-7819/EIP-7851 fixtures passed.
-- **The `@future` EVM version is a placeholder.** When EIP-8141, EIP-7819, EIP-7851, or
-  EIP-8151 gets a real fork assignment, its gate in `liblangutil/EVMVersion.h` should move from
-  `future()`.
+  Yul-interpreter results above describe the historical baseline; see VERSIONS for current checks.
+- **The `@future` EVM version is a placeholder.** When the proposals' activation rules
+  are implemented in a named compiler EVM target, their gates in
+  `liblangutil/EVMVersion.h` should move from `future()`.
 
 ## Spec status
 
-EIP-8141 is a **Draft** (created 2026-01-29), with an open official
-[`execution-specs` tracker](https://github.com/ethereum/execution-specs/issues/2829) in the
-[Bogota milestone](https://github.com/ethereum/execution-specs/milestone/29). It is not final
-and details have already shifted — several third-party write-ups describe an older opcode set (`TXPARAMLOAD` /
-`TXPARAMSIZE` / `TXPARAMCOPY`) and inverted `APPROVE` scope values. Check both upstream and
-the local implementation overlay rather than relying on a summary.
+EIP-8141 remains Draft and is SFI for Hegotá. The selected supporting drafts are PFI.
+The exact sources, fork-inclusion evidence, and current implementation boundaries are in
+[spec/README.md](../spec/README.md). `spec/EIP8141.md` is an exact upstream snapshot;
+historical fixture notes are in `spec/TOOLKIT-FIXTURES.md`.
 
-Run `tools/check-spec-drift.sh` to compare current upstream EIP-8141 with exact official pin
-`f767a1e8078e17c9b381a91d35a09492189ede1b`. [`spec/EIP8141.md`](../spec/EIP8141.md)
-contains that current-master normative body, explanatory toolkit notes, and a separate
-non-normative tooling-fixture appendix; those local notes are not the checker's byte-for-byte
-baseline.
-Consult [VERSIONS.md](../VERSIONS.md) for the current stack's map from spec areas to affected
-code.
-
-For rollout planning rather than implementation details, see
-[the migration guide](05-migration.md).
+Run `tools/check-spec-drift.sh` to check all selected proposals and their tracked dependencies.
+[VERSIONS.md](../VERSIONS.md) distinguishes the published toolchain pins from this working tree.

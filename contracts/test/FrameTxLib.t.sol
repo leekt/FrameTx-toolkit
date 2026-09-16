@@ -6,6 +6,10 @@ import {FrameTest, IFrameVm} from "./FrameTest.sol";
 interface IHarness {
     function txType() external view returns (uint256);
     function txNonce() external view returns (uint256);
+    function legacyNonce() external view returns (uint256);
+    function nonceKeyCount() external view returns (uint256);
+    function nonceKeysHash() external view returns (bytes32);
+    function firstNonceKey() external view returns (uint256);
     function txSender() external view returns (address);
     function maxPriorityFeePerGas() external view returns (uint256);
     function maxFeePerGas() external view returns (uint256);
@@ -264,6 +268,12 @@ contract FrameTxLibTest is FrameTest {
     function test_txScope() public inFrame {
         assertEq(h.txType(), 0x06, "txType");
         assertEq(h.txNonce(), 7, "nonce");
+        assertEq(h.legacyNonce(), 7, "pre-state legacy nonce");
+        assertEq(h.nonceKeyCount(), 1, "baseline key count");
+        assertEq(
+            h.nonceKeysHash(), keccak256(abi.encode(uint256(1), uint256(0))), "baseline keys hash"
+        );
+        assertEq(h.firstNonceKey(), 0, "baseline key");
         assertEq(h.txSender(), address(0xACC0), "sender");
         assertEq(h.maxPriorityFeePerGas(), 2 gwei, "maxPriorityFeePerGas");
         assertEq(h.maxFeePerGas(), 30 gwei, "maxFeePerGas");

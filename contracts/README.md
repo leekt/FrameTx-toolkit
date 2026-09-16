@@ -1,5 +1,14 @@
 # Foundry project
 
+For contract-only frame testing on a stock EVM, use **[vFrame](../vframe/README.md)**:
+
+```bash
+forge test --root ../vframe -vv
+```
+
+It uses stock solc and ordinary contract calls. The native toolkit described below is
+a separate execution path.
+
 The toolkit's patched Foundry both compiles and executes frame contracts: the default
 profile drives the patched solc at the experimental `@future` EVM version, so `forge build`
 and `forge test` cover the whole project. The Foundry fork maps `@future` to the

@@ -1,0 +1,26 @@
+# Standalone stock-Foundry project. Does not load the native @future profile.
+[profile.default]
+src = "src"
+test = "test"
+script = "script"
+out = "out"
+cache_path = "cache"
+libs = ["dependencies"]
+auto_detect_remappings = false
+remappings = ["forge-std/=dependencies/forge-std-1.16.2/src/"]
+solc = "0.8.30"
+evm_version = "osaka"
+optimizer = true
+optimizer_runs = 200
+cbor_metadata = false
+bytecode_hash = "none"
+
+[fmt]
+line_length = 100
+tab_width = 4
+
+[soldeer]
+remappings_generate = false
+
+[dependencies]
+forge-std = "1.16.2"

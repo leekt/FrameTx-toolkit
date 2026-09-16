@@ -7,29 +7,32 @@ worked smart accounts with tests.
 EIP-8141 is a **draft**. The upstream spec base, toolchain gitlinks, and Solidity package
 pins are recorded exactly in [VERSIONS.md](VERSIONS.md).
 
-> [!note] Reproducible current stack
-> The EIP-8141 stack is published on each fork's default branch: Solidity `develop` at
-> `4c6c547d9a35b23807f421692ac65c35f26f3d54`, revm `main` at
-> `21ace0ade666d99f3e1c6e95ba173972164d0ceb`, foundry-core `main` at
-> `f415f6fef0a62f44c7faa83daa8e37b14f0e009b`, and Foundry `master` at
-> `5683db7dc79cace93363fe3465e20792b859bec9`. The real Kernel v3.3 migration fixture uses
-> official ZeroDev Kernel commit `cd697c7e21715d015e0643af22310a99aa17433b`. Foundry
-> promotion passed 27/27 primitives, 44/44 Anvil unit, and 30/30 Anvil integration tests;
-> the contract project passes 304/304 tests across 17 suites. The root gitlinks pin the
-> toolchain forks, while [`contracts/soldeer.lock`](contracts/soldeer.lock) pins Kernel,
-> Solady, forge-std, and ExcessivelySafeCall. To inspect later primary-branch movement without
-> changing the toolchain pins, use
-> [the fetch-only submodule sync command](.claude/commands/sync-submodules.md).
+See [the current spec baseline](spec/README.md) for the selected AA proposals and
+implementation boundaries. The submodules and Foundry dependency pins record the published
+toolchain revisions; build those sources as described below.
 
-## Getting started
+## vFrame: testing on a stock EVM
+
+[vFrame](vframe/README.md) is an ordinary Solidity EntryPoint for testing
+validation, account execution, sponsorship, keyed nonces, and atomic rollback. It runs
+without FrameTx EIPs or patched tools:
+
+```bash
+forge test --root vframe -vv
+```
+
+It includes an owner account, a sponsor, and a deployment/relay demo. See the
+[vFrame guide](vframe/README.md) for dependency setup, operation construction,
+and the differences from native protocol execution.
+
+## Getting started with the native toolkit
 
 The patched solc and forge/anvil are built inside the toolchain submodules and invoked by
 path, so your existing `forge` (`~/.foundry/bin`) and any system solc stay untouched.
 Solidity packages install locally under the ignored `contracts/dependencies/` directory via
 Soldeer.
 
-**1. Get the current stack** (the gitlinks pin its exact revm/foundry commits; stale
-binaries built from other submodule states will fail):
+**1. Clone the toolkit and its pinned toolchain.**
 
 ```bash
 git clone --recurse-submodules https://github.com/leekt/FrameTx-toolkit.git
@@ -38,10 +41,9 @@ cd FrameTx-toolkit
 git pull && git submodule update --init --recursive
 ```
 
-**2. Build the two patched tools** (once, then incremental). In the current stack,
-Foundry's manifest pins the revm fork (all twelve crates) and the foundry-core fork
-(compilers with the `@future` EVM version) at exact commits, so cargo fetches the right
-sources automatically — you never build them separately unless you are hacking on them:
+**2. Build the two patched tools** (once, then incremental). Foundry pins all twelve
+REVM crates to the published revision recorded by the REVM submodule and pins its
+foundry-core compiler dependency for `@future`:
 
 ```bash
 # patched solc  ->  solidity/build/solc/solc
@@ -73,7 +75,7 @@ verification paths need, without enabling Amsterdam's incompatible node-level st
 For real signed type-`0x06` envelopes, receipts, and state gas, run the patched node:
 
 ```bash
-foundry/target/debug/anvil --enable-frame-transactions   # plus --enable-eip7819 / --enable-eip7851 / --enable-eip8151 as needed
+foundry/target/debug/anvil --enable-frame-transactions   # plus --enable-eip8151 as needed
 ```
 
 That command is sufficient for the existing frame-transaction examples. To execute a
@@ -84,8 +86,8 @@ active. The repository does not yet claim a raw-transaction WebAuthn end-to-end 
 
 - Stock `forge` still runs the policy layer through the `policy` profile:
   `FOUNDRY_PROFILE=policy forge test --match-path test/FrameAccountPolicy.t.sol`.
-  Everything else — `@future` compilation, `setFrameTx`, the frame opcodes — needs the
-  patched binaries.
+  The [vFrame project](vframe/README.md) also runs on stock tools. Native
+  `@future` compilation, `setFrameTx`, and frame opcodes need the patched binaries.
 - Don't `foundryup` or `cargo install` the fork — invoking by path is the design. If the
   path gets old: `alias fforge=$PWD/foundry/target/debug/forge` (and `fanvil` likewise).
 - The patched forge runs any normal Foundry project unchanged. To use frame opcodes in
@@ -94,8 +96,7 @@ active. The repository does not yet claim a raw-transaction WebAuthn end-to-end 
   the runtime in tests, and declare the `IFrameVm` interface field-for-field (copy
   [`contracts/test/FrameTest.sol`](contracts/test/FrameTest.sol)).
 - Sanity checks: [guides/01-build.md](guides/01-build.md) has a probe contract confirming
-  you're on the right solc (stock solc lacks `approvetx`; an older fork lacks
-  `setdelegate`/`setselfdelegate`).
+  you're on the right solc (stock solc lacks `approvetx`).
   [`tools/check-spec-drift.sh`](tools/check-spec-drift.sh) tells you if upstream EIP-8141
   moved off the pin.
 
@@ -103,29 +104,23 @@ Prerequisites and the full build order live in [guides/01-build.md](guides/01-bu
 
 ## EIP roadmap
 
-| EIP | Change | Target fork | Inclusion status | Toolkit support |
-|---|---|---|---|---|
-| [EIP-7997](https://forkcast.org/eips/7997) | Deterministic factory contract | [Glamsterdam](https://forkcast.org/upgrade/glamsterdam) | Scheduled (SFI) | Exact factory address/runtime already available in Anvil, plus the `Create2FactoryLib` Solidity helper; fork-gated activation and nonce `1` are not modeled |
-| [EIP-8141](https://eips.ethereum.org/EIPS/eip-8141) | Frame transactions | [Bogota milestone](https://github.com/ethereum/execution-specs/milestone/29) | Draft; [implementation tracker #2829](https://github.com/ethereum/execution-specs/issues/2829) open | Compiler, VM, and opt-in Anvil raw-RPC path aligned and tested against the pinned current master, including receipts, traces, and fork replay |
-| [EIP-7906](https://forkcast.org/eips/7906) | Transaction assertions via state-diff opcode | [Hegotá](https://forkcast.org/upgrade/hegota) | Proposed (PFI) | Host-supplied EVM fixture only; wire and trace construction not implemented |
-| [EIP-8250](https://forkcast.org/eips/8250) | Keyed nonces for frame transactions | [Hegotá](https://forkcast.org/upgrade/hegota) | Proposed (PFI) | Not implemented; the toolkit exposes only EIP-8141's scalar nonce |
-| [EIP-8272](https://forkcast.org/eips/8272) | Recent roots for frame transactions | [Hegotá](https://forkcast.org/upgrade/hegota) | Proposed (PFI) | Host-supplied context only; wire and root verification not implemented |
-| [EIP-7819](https://forkcast.org/eips/7819) | `SETDELEGATE` instruction | [Hegotá](https://forkcast.org/upgrade/hegota) | Proposed (PFI) | Compiler, REVM, and explicit Anvil opt-in implemented with gas, collision, refund, clearing, nonce, and immediate-effect coverage |
-| [EIP-7851](https://forkcast.org/eips/7851) | Code-controlled EOA delegation | [Hegotá](https://forkcast.org/upgrade/hegota) | Proposed (PFI) | Compiler, REVM, and Ethereum-only Anvil opt-in implemented; upstream leaves the opcode TBD, so the toolkit explicitly uses non-normative `0xf7` |
-| [EIP-8151](https://forkcast.org/eips/8151) | Account-code-restricted `ecRecover` | [Hegotá](https://forkcast.org/upgrade/hegota) | Proposed (PFI) | Compiler mutability/formal modeling, REVM, and Ethereum-only Foundry/Anvil opt-in implemented with raw-code, gas, warmth, replay, and access-list coverage |
+The selected AA set is EIP-8141 plus **7906, 8250, 8272, 8298, and 8151**. PFI is
+eligible; DFI proposals are excluded. Inclusion is pinned as of 2026-09-16.
 
-EIP-8141's Draft status and open Bogota target are sourced from the official EIP and
-[`execution-specs` tracker](https://github.com/ethereum/execution-specs/issues/2829) as of
-2026-08-23; the remaining roadmap rows retain their Forkcast 2026-08-16 snapshot. The local
-[implementation document](spec/EIP8141.md) has a normative body matching pinned official
-master `f767a1e8078e17c9b381a91d35a09492189ede1b`, including the merged native
-`SIGDATACOPY` instruction, plus a clearly non-normative appendix for the context-only
-EIP-8250/8272/7906 tooling fixture. Signature schemes `0x03` through `0xff` remain reserved;
-the appendix does not define transaction-wire semantics for its fixture extensions.
+| EIP | Status | Toolkit support |
+|---|---|---|
+| [8141](https://eips.ethereum.org/EIPS/eip-8141) Frame transactions | Hegotá SFI; Draft specification | Compiler, REVM, Forge and opt-in Anvil; explicit state-gas and mempool limits |
+| [7906](https://eips.ethereum.org/EIPS/eip-7906) Transaction assertions | PFI | Host fixtures; raw POST_TX execution remains pending |
+| [8250](https://eips.ethereum.org/EIPS/eip-8250) Keyed nonces | PFI | Nested-fee wire format, nonce bookkeeping and state-gas first-use charges |
+| [8272](https://eips.ethereum.org/EIPS/eip-8272) Recent roots | PFI | Verifier-frame tuple encoder; canonical verifier bytecode remains TBD |
+| [8298](https://eips.ethereum.org/EIPS/eip-8298) SETCODEFROM | PFI | Spec tracked; opcode remains TBD and execution is not implemented |
+| [8151](https://eips.ethereum.org/EIPS/eip-8151) Code-restricted ecRecover | PFI | Compiler semantics and explicit Ethereum-only REVM/Foundry/Anvil opt-in |
+| [7997](https://eips.ethereum.org/EIPS/eip-7997) Deterministic factory | Glamsterdam SFI | Exact factory/runtime and Create2FactoryLib; activation nonce/fork gating not modeled |
 
-A fresh recursive clone checks out the exact current compiler, VM, and tooling commits. See
-[Building the toolkit](guides/01-build.md) for the required build order and reproducibility
-details.
+EIP-7819 and EIP-7851 were DFI'd at [ACDE 245](https://forkcast.org/calls/acde/245/)
+and are removed. [Spec sources and migration notes](spec/README.md) record exact revisions,
+breaking wire changes, and pending work. EIP-8141's [local document](spec/EIP8141.md)
+is now an exact upstream snapshot; historical synthetic fixtures are documented separately.
 
 ## What EIP-8141 changes
 
@@ -188,7 +183,7 @@ default payer path without compatible account code or delegation.
 | [`foundry-core/`](foundry-core/) | Submodule — teaches Foundry's compiler layer the experimental `@future` EVM target |
 | [`foundry/`](foundry/) | Submodule — `forge` with the frame cheatcodes and opt-in Anvil transaction path |
 | [`contracts/soldeer.lock`](contracts/soldeer.lock) | Exact Kernel v3.3, Solady, forge-std, and ExcessivelySafeCall package resolution; `forge soldeer install` restores them under `contracts/dependencies/` |
-| [`spec/EIP8141.md`](spec/EIP8141.md) | Current-master normative overlay and a non-normative tooling-fixture appendix |
+| [`spec/EIP8141.md`](spec/EIP8141.md) | Exact pinned upstream FrameTx specification |
 | [`contracts/`](contracts/) | The Foundry project: accounts in `src/accounts`, digest formatters in `src/formatters`, policy in `src/policy`, EIP helper libraries in `src/eips`, **all tests** in `test/` |
 | [`guides/`](guides/) | Build, write, and what does not work yet |
 | [`tools/check-spec-drift.sh`](tools/check-spec-drift.sh) | Detect whether the spec moved |
@@ -307,7 +302,7 @@ cargo test --manifest-path foundry/Cargo.toml --locked -p anvil --test it frame_
 ```
 
 `--enable-frame-transactions` is independent of the experimental proposal flags. Add
-`--enable-eip7819`, `--enable-eip7851`, or `--enable-eip8151` when a test also needs those
+`--enable-eip8151` when a test also needs those
 features.
 
 ## Guides
@@ -368,14 +363,10 @@ RPC receipt, and installs the canonical expiry verifier at `0x8141`. `forge test
 additionally exercises accounts in isolation via the `setFrameTx` cheatcode. See
 [guides/04-foundry.md](guides/04-foundry.md).
 
-**Experimental proposals have separate opt-ins.** Compile `setdelegate(salt, target)`,
-`setselfdelegate(target)`, and contracts whose `ecrecover` mutability matters against solc's
-`@future` EVM version. Start Anvil with `--enable-eip7819`, `--enable-eip7851`, or
-`--enable-eip8151`; all three stay disabled by default and require Prague-or-later execution
-rules. EIP-7851 and EIP-8151 are limited to the canonical Ethereum profile. EIP-7851 uses
-toolkit-local opcode `0xf7` while the upstream assignment remains TBD. No flag implies
-`--enable-frame-transactions`; see
-[guides/04-foundry.md](guides/04-foundry.md).
+**EIP-8151 has a separate opt-in.** Compile contracts whose `ecrecover` mutability
+matters against solc's `@future` target. Anvil's `--enable-eip8151` remains off by default
+and requires Prague-or-later canonical Ethereum execution. It does not enable FrameTx.
+See [the proposal status table](spec/README.md) for the other selected drafts.
 
 ## When the spec changes
 
@@ -383,25 +374,20 @@ toolkit-local opcode `0xf7` while the upstream assignment remains TBD. No flag i
 tools/check-spec-drift.sh
 ```
 
-Fetches the exact upstream source pin and current `ethereum/EIPs` master, then exits
-non-zero and prints their diff if upstream moved. It deliberately does not compare the
-local explanatory notes or the tooling appendix to upstream as
-though they should be identical.
+Verifies local snapshot checksums and compares all selected sources with one resolved
+`ethereum/EIPs` master revision. It exits non-zero on drift or errors; add `--diff` to
+print changed source text. Explanatory notes and fixture documentation are separate.
 [VERSIONS.md](VERSIONS.md) maps each spec area to the code implementing it, so you can go
 straight to what a given change affects.
 
 ## Status
 
-Proof of concept. Compiler support, synthetic Forge execution, and the opt-in Anvil raw-RPC
-path exist in the current pinned toolkit stack, including nested receipts, parity traces,
-canonical raw-byte fork replay, and expiry-verifier activation. The
-default branches (`develop`, `main`, `main`, and `master`, respectively) for Solidity, revm,
-foundry-core, and Foundry contain the pinned stack. A fresh recursive clone plus
-`forge soldeer install` reproduces the toolchain and contract dependencies.
-Keyed-nonce/recent-root/POST_TX
-wire and state integration, public-pool policy, gossip, and Amsterdam state-gas compatibility
-are not implemented. ML-DSA is not a native scheme and no ready verifier is shipped;
-experiments must use `ARBITRARY` witness bytes and validation code. Experimental EIP-7819,
-EIP-7851, and EIP-8151 compiler/VM and opt-in
-Anvil support is also present. Non-Ethereum execution profiles reject frame envelopes and mask
-the Ethereum-only proposal flags. Not independently audited; not for production.
+Proof of concept. The working tree includes compiler support, synthetic Forge execution,
+and opt-in Anvil raw RPC with frame receipts, traces, replay and expiry verification.
+The published gitlinks predate this migration; see [VERSIONS.md](VERSIONS.md) for pins
+and verification.
+Current working-tree support and remaining gaps are recorded in [spec/README.md](spec/README.md).
+Keyed nonces use the current EIP-8250 format; recent-root verification, raw POST_TX execution,
+public-pool policy, gossip, and complete Amsterdam state-gas integration remain pending.
+EIP-8298 is tracked without assigning its TBD opcode. ML-DSA is not a native scheme and
+no ready verifier is shipped. EIP-8151 retains its explicit Ethereum-only opt-in.

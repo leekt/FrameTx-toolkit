@@ -1,0 +1,89 @@
+{
+  "checked_at": "2026-09-16",
+  "repository": "ethereum/forkcast",
+  "revision": "ccfe45542b0753d3c7fd2c4a59411febeb883ac8",
+  "policy": "PFI, CFI, SFI and Included are eligible; DFI is excluded.",
+  "proposals": [
+    {
+      "eip": 8141,
+      "fork": "Hegota",
+      "status": "Scheduled",
+      "call": "acde/244",
+      "date": "2026-08-27",
+      "sha256": "cd2f2930dbff644af009265747f50cf4934b0c48aace2fbc4c540f02e45f7893",
+      "upstream_sha256": "d03d3714903675d538c1cfc00760f41563ea5f6beb17959a02389d5d3b1b00ca"
+    },
+    {
+      "eip": 7819,
+      "fork": "Hegota",
+      "status": "Declined",
+      "call": "acde/245",
+      "date": "2026-09-10",
+      "sha256": "e0a282c827d577ecca7e882c15ca1f5c3f0eb6fc0cc1301b4f6c9384c09c4daf",
+      "upstream_sha256": "6c0a8afad0cbb7839366ea7bd891b016d8272042d8e28882ce52f5aa200d8720"
+    },
+    {
+      "eip": 7851,
+      "fork": "Hegota",
+      "status": "Declined",
+      "call": "acde/245",
+      "date": "2026-09-10",
+      "sha256": "31c9887e5b0416da3d3cc809a15a3c156d0a9990a216831ddf97b9510982e7b5",
+      "upstream_sha256": "14bd596cfc4d9c8d273b2a7fddc689199086f5a5efbe228a3da9392b4572d428"
+    },
+    {
+      "eip": 8151,
+      "fork": "Hegota",
+      "status": "Proposed",
+      "call": "acde/238",
+      "date": "2026-06-04",
+      "sha256": "29e19c5a0cde8dbc7b4e95aa9f621d08896f0390e15a34840dcb645cbe71f83e",
+      "upstream_sha256": "a696a6d616c11e03f3d2c4e92eb99abb6586b41cbf36cc28e6ea89d5cc049f82"
+    },
+    {
+      "eip": 8250,
+      "fork": "Hegota",
+      "status": "Proposed",
+      "call": "acde/240",
+      "date": "2026-07-02",
+      "sha256": "2bf02b21475d265c685df9b1354f943c141f5485ecdc8bac0d79bcebab2a532e",
+      "upstream_sha256": "2a075831e7d84c5c8150c98a3d55ffff2cfd0de75c3466699ba747053f363902"
+    },
+    {
+      "eip": 8272,
+      "fork": "Hegota",
+      "status": "Proposed",
+      "call": "acde/240",
+      "date": "2026-07-02",
+      "sha256": "575a47f6d2a49ce2eefef44663836af18be304b3a305bfb46a200e9c01c37317",
+      "upstream_sha256": "c8497d7851122f9feb8a5edbf100d324395138bfd8611a99a2a03fdcec4f4b1b"
+    },
+    {
+      "eip": 7906,
+      "fork": "Hegota",
+      "status": "Proposed",
+      "call": "acde/242",
+      "date": "2026-07-30",
+      "sha256": "5303d49fe4b70ab1751ef782f91736be2259f3f2ff109a57486cb7cba05c558a",
+      "upstream_sha256": "9ff7527a9f1d8d31ff4ed4cb57450742e15bed48d160ca620cf0997b973a6b93"
+    },
+    {
+      "eip": 7997,
+      "fork": "Glamsterdam",
+      "status": "Scheduled",
+      "call": null,
+      "date": "2026-08-04",
+      "sha256": "decf3cdeac8806f1ceb919028131de1bc485b3da359cf86cbb770c6411ac0d15",
+      "upstream_sha256": "691c57f622d1db477c63a983e8bdd92f0ae8d8d6f66e2f5bfdf8bcb69c605ec3"
+    },
+    {
+      "eip": 8298,
+      "fork": "Hegota",
+      "status": "Proposed",
+      "call": "acde/240",
+      "date": "2026-07-02",
+      "sha256": "eced7172ffe517a6d7238a36705b3095ebc646116ca8d2f2dff6aac6a306b911",
+      "upstream_sha256": "71104573cb8927dcab0bbf966aa4642a67334d564ca06f114b471df975d4c76d"
+    }
+  ]
+}

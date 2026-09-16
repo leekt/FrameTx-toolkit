@@ -1,0 +1,15 @@
+{
+  "id": 8272,
+  "forkRelationships": [
+    {
+      "forkName": "Hegota",
+      "statusHistory": [
+        {
+          "status": "Proposed",
+          "call": "acde/240",
+          "date": "2026-07-02"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,228 @@
+{
+  "checked_at": "2026-09-16",
+  "repository": "ethereum/EIPs",
+  "revision": "90194cfa32915fc8a4ba5b7eea783774c2182b7f",
+  "forkcast_revision": "ccfe45542b0753d3c7fd2c4a59411febeb883ac8",
+  "eips": [
+    {
+      "eip": 2,
+      "role": "dependency",
+      "sha256": "283af272148eb597d931cb58bd3a64e8573c781f90448ff38a7eeea4ef2c9a26"
+    },
+    {
+      "eip": 155,
+      "role": "dependency",
+      "sha256": "3c208813585d8fca67a92d908ece47402f87a18a14f1b20ee5ebcb3e702dcc9c"
+    },
+    {
+      "eip": 161,
+      "role": "dependency",
+      "sha256": "45f6beabbf885e3f95199a7ec763a9483d6de61ad689e00fd8e6121c136e991f"
+    },
+    {
+      "eip": 191,
+      "role": "dependency",
+      "sha256": "c5f837961e2cf879534cbbdd4d9cb1aa29eae7ad5f5199ced47a20a29706a9ba"
+    },
+    {
+      "eip": 684,
+      "role": "dependency",
+      "sha256": "9bae89bea18d2cd0da0b94bf2bd725a9c8c4deb6bc846186fcb513a8a89128d8"
+    },
+    {
+      "eip": 712,
+      "role": "vframe-dependency",
+      "sha256": "459086f5a0b2d6a0ac4e404faebf3660a49aa4b1712711521093380689f02304"
+    },
+    {
+      "eip": 1014,
+      "role": "dependency",
+      "sha256": "c6b6b95eecf9979593921ee2fdf1986eb1671e43b9a312111072ad040f7290ac"
+    },
+    {
+      "eip": 1052,
+      "role": "dependency",
+      "sha256": "9cf87c650190580d5402ade6122bf14293e02799894e05ce914eb7fb3978778f"
+    },
+    {
+      "eip": 1153,
+      "role": "vframe-dependency",
+      "sha256": "c0e7a2e793f3fa44f048b772a3fb4779199d29b6d240c97e3723ace1e46e1c40"
+    },
+    {
+      "eip": 1559,
+      "role": "dependency",
+      "sha256": "4460ad966a22d8501e12d75165c2c784c61748d8128229f115ebac1bfccac59f"
+    },
+    {
+      "eip": 2200,
+      "role": "dependency",
+      "sha256": "ae8cb7fd68026b17cda1ecb22178bdaff91424939c1198dfc5a9f421df5db19a"
+    },
+    {
+      "eip": 2681,
+      "role": "dependency",
+      "sha256": "460625e6bd904312a649352f7a8a476cfc3550f130eef78060c93e9116eb3eee"
+    },
+    {
+      "eip": 2718,
+      "role": "dependency",
+      "sha256": "876de14066ad67c9a1c0a87dc3bd18695325dcfc7d4b8326734de0bc174e4bf4"
+    },
+    {
+      "eip": 2780,
+      "role": "dependency",
+      "sha256": "35f36f375a80612b8a9911e8c04b2ab4ec7f4e438e7d4dc83957e0372459ec85"
+    },
+    {
+      "eip": 2929,
+      "role": "dependency",
+      "sha256": "177b2040bf0376b1182eb5571c7fda7a41b6f594083fa816506d65cfcf2acc4a"
+    },
+    {
+      "eip": 2930,
+      "role": "dependency",
+      "sha256": "691f06ecd80a1f5ec71f169553b808c837f68e06860ffac68dd44649e93b804b"
+    },
+    {
+      "eip": 3529,
+      "role": "dependency",
+      "sha256": "0446476577d3ebfd307e4524b565d0868b7aa2f078911908e5383ebff1ad6f3b"
+    },
+    {
+      "eip": 3541,
+      "role": "dependency",
+      "sha256": "dff418f1ed441352ee656eb5ba1d96c12acdefc788251e4d63149cfb442fba07"
+    },
+    {
+      "eip": 3607,
+      "role": "dependency",
+      "sha256": "2c3789bcbb7fd59f03db7d2f179e185f3debcf8c58180ac0db62cb77af738fc7"
+    },
+    {
+      "eip": 4788,
+      "role": "dependency",
+      "sha256": "491e6afa5695e0f9a5df1e0a2009cc928a5bd938aab8b39e6187b8127c7810d2"
+    },
+    {
+      "eip": 4844,
+      "role": "dependency",
+      "sha256": "2772bdb675d90d89ebb4bf74269e48c8ea46745e78161c8574ffa78328b31885"
+    },
+    {
+      "eip": 4895,
+      "role": "dependency",
+      "sha256": "f7766f0bd9bb14f76479c01e77388fd1a8823cb17c2919a317d51038a9e1be69"
+    },
+    {
+      "eip": 6780,
+      "role": "dependency",
+      "sha256": "3941eed8379cc93abb7342c5b186bd883e8b1518b0025d94a49be068f8ea2101"
+    },
+    {
+      "eip": 7594,
+      "role": "dependency",
+      "sha256": "34b8426335cfd3f6f335ac2e3d3d0ef42bd0b007b0cc653fef130e29e3b212e4"
+    },
+    {
+      "eip": 7610,
+      "role": "dependency",
+      "sha256": "e934db8fded813da2d2cf231dbdcd0f829418b5394db3750fb31292d3dbfacd6"
+    },
+    {
+      "eip": 7623,
+      "role": "dependency",
+      "sha256": "b991940be17e3265684047d49b0f5758742c3873b88efaa9aa30e4229ea92c33"
+    },
+    {
+      "eip": 7702,
+      "role": "dependency",
+      "sha256": "3d46953e13ebc7ebe229971b301ede853aad6e29f4faf4db1eb9a2085accde1b"
+    },
+    {
+      "eip": 7708,
+      "role": "dependency",
+      "sha256": "417b7de3542615cd31d7c746bd47e0b1bb74c3f50d038da1a12aa377d4641bfb"
+    },
+    {
+      "eip": 7778,
+      "role": "dependency",
+      "sha256": "cc2e8642ee0e3f1e6d59c9652f49db944101f97f8e39ad501f0615ac6969f839"
+    },
+    {
+      "eip": 7825,
+      "role": "dependency",
+      "sha256": "86e82af6cfba9593efb3f8cc16ccc23f13bb0e82c4e7782679cf71b95fcc2fe3"
+    },
+    {
+      "eip": 7843,
+      "role": "dependency",
+      "sha256": "a0fdb59f271da0aa18d518ca8b0aa3b4177dda89d6b086f2396e8f09fcf323a5"
+    },
+    {
+      "eip": 7906,
+      "role": "proposal",
+      "sha256": "87b555611b48b1910654a9e5625755b80ecd7f6819a411d86d1da94c5e4829fd"
+    },
+    {
+      "eip": 7928,
+      "role": "dependency",
+      "sha256": "432c4e608dc73647a5db21156163ff03252786fa6d09f306721e847b1e5fae0b"
+    },
+    {
+      "eip": 7951,
+      "role": "dependency",
+      "sha256": "ea599f929ceaa420d83fb90ac27a1370c2c1e150a339a68a15dc721d42d50323"
+    },
+    {
+      "eip": 7976,
+      "role": "dependency",
+      "sha256": "b583f02f9a14b74a0a13bbb0a6e3e150dbf996f04421ad3b9b8495cfeb0d67ae"
+    },
+    {
+      "eip": 7997,
+      "role": "proposal",
+      "sha256": "169eaf090b5fc4db8ac7c6cc3f1ac8ed427a611a3df3428dc405ef8c61ad1baa"
+    },
+    {
+      "eip": 8037,
+      "role": "dependency",
+      "sha256": "87b868b2839c0c801d9dbc598b45d1d2156533096c606a35ba5bdafdfa2f0e81"
+    },
+    {
+      "eip": 8038,
+      "role": "dependency",
+      "sha256": "c63a91a3a48d4d22fbba1ca66dcea86d813126c010d0c37079af0609dba3fa79"
+    },
+    {
+      "eip": 8141,
+      "role": "proposal",
+      "sha256": "9692a2da8903559952090bf4f529fdc8bf49cb4ddb4d1779498867600e945195"
+    },
+    {
+      "eip": 8151,
+      "role": "proposal",
+      "sha256": "47ee87b138dc90eb82089da1dd7cd2bd9ca0e9252487b44b9757f3aae4da2e6e"
+    },
+    {
+      "eip": 8246,
+      "role": "dependency",
+      "sha256": "775619a4a5ea8b3b73eae4e1aeaff699930705f0312d91001dc7c4cb5ea4dbf5"
+    },
+    {
+      "eip": 8250,
+      "role": "proposal",
+      "sha256": "27e5699a63a1866efee5ecca27a3c5c32d41a0e4bccafa686fd38e2fd420f891"
+    },
+    {
+      "eip": 8272,
+      "role": "proposal",
+      "sha256": "82419d7e5c094b03539e4c7d1da91f4a117cce7a95d147b8776f8e0c668471f1"
+    },
+    {
+      "eip": 8298,
+      "role": "proposal",
+      "sha256": "cd8ad148f767f7ccdaa941cc34cffec2743420054c66214c1f3cfc645c7dbbdb"
+    }
+  ]
+}

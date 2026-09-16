@@ -57,6 +57,22 @@ contract FrameTxLibHarness {
         return FrameTxLib.signatureCount();
     }
 
+    function legacyNonce() external view returns (uint256) {
+        return FrameTxLib.legacyNonce();
+    }
+
+    function nonceKeyCount() external view returns (uint256) {
+        return FrameTxLib.nonceKeyCount();
+    }
+
+    function nonceKeysHash() external view returns (bytes32) {
+        return FrameTxLib.nonceKeysHash();
+    }
+
+    function firstNonceKey() external view returns (uint256) {
+        return FrameTxLib.firstNonceKey();
+    }
+
     function recentRootSourceId(uint256 i) external view returns (bytes32) {
         return FrameTxLib.recentRootSourceId(i);
     }

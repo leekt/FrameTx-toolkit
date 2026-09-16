@@ -1,0 +1,25 @@
+{
+  "id": 7997,
+  "forkRelationships": [
+    {
+      "forkName": "Glamsterdam",
+      "statusHistory": [
+        {
+          "status": "Proposed",
+          "call": null,
+          "date": null
+        },
+        {
+          "status": "Considered",
+          "call": "acde/227",
+          "date": "2026-01-05"
+        },
+        {
+          "status": "Scheduled",
+          "call": null,
+          "date": "2026-08-04"
+        }
+      ]
+    }
+  ]
+}

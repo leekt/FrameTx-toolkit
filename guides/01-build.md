@@ -10,13 +10,14 @@ generation must happen before `forge test`.
 
 ## Reproducibility
 
-The root gitlinks, Foundry's twelve REVM manifest patches, `Cargo.lock`, and the contract
-project's `soldeer.lock` record the exact current stack in [VERSIONS.md](../VERSIONS.md):
+The root gitlinks record the published toolchain below. Foundry pins all twelve REVM
+crates to the same published commit as the REVM submodule. The Solidity package pins
+are unchanged; see [VERSIONS.md](../VERSIONS.md).
 
-- Solidity `develop` is pinned at `4c6c547d9a35b23807f421692ac65c35f26f3d54`.
-- revm `main` is pinned at `21ace0ade666d99f3e1c6e95ba173972164d0ceb`.
+- Solidity `develop` is pinned at `b10327c16ff95b15080ac5ba6abb1ff1ef3f06a3`.
+- revm `main` is pinned at `cf4c47a0997295279a71a34ccc343b15c1d87e67`.
 - foundry-core `main` is pinned at `f415f6fef0a62f44c7faa83daa8e37b14f0e009b`.
-- Foundry `master` is pinned at `5683db7dc79cace93363fe3465e20792b859bec9`.
+- Foundry `master` is pinned at `217047e6f39971f93c1aadba902751bfcbe37235`.
 - The official Kernel v3.3 fixture is pinned at
   `cd697c7e21715d015e0643af22310a99aa17433b`.
 - Solady is pinned at `3f2f5345261904463f5429c9031c3d2185c0f4fe`, the exact
@@ -24,12 +25,9 @@ project's `soldeer.lock` record the exact current stack in [VERSIONS.md](../VERS
 - ExcessivelySafeCall is pinned at `81cd99ce3e69117d665d7601c330ea03b97acce0`,
   and forge-std is locked to registry release `1.16.2`.
 
-The four toolchain forks publish EIP-8141 on their default branches. Foundry promotion passed
-27/27 primitives, 44/44 Anvil unit, and 30/30 Anvil integration tests. The root gitlinks pin
-those toolchain commits; `git submodule update --init --recursive` checks out the four
-top-level toolchain submodules. Soldeer restores every Solidity dependency separately from
-the contract lockfile. For toolchain update discovery, the repository's sync command fetches
-remote refs without automatically replacing the recorded checkouts.
+Soldeer restores Solidity dependencies from the contract lockfile. The repository sync
+command fetches remote refs without replacing the recorded checkouts. Current migration
+checks are recorded in [VERSIONS.md](../VERSIONS.md#latest-review-verification-2026-09-16).
 
 Follow the build order below from a fresh clone.
 
@@ -77,12 +75,7 @@ cat > /tmp/frame-probe.sol <<'EOF'
 contract T {
     function approve() external { assembly { approvetx(0, 0, 3) } }
     function traceCount() external view returns (uint256 n) { assembly { n := txtrace(0, 0) } }
-    function setDelegate(bytes32 salt, address target) external returns (address location) {
-        assembly { location := setdelegate(salt, target) }
-    }
-    function setSelfDelegate(address target) external returns (bool success) {
-        assembly { success := setselfdelegate(target) }
-    }
+
 }
 EOF
 solidity/build/solc/solc --experimental --evm-version @future \
@@ -91,20 +84,15 @@ rm -f /tmp/frame-probe.sol
 ```
 
 Successful compilation identifies the current tooling compiler. A missing `approvetx`
-identifies stock solc; a missing `txtrace`, `setdelegate`, or `setselfdelegate` can identify an
-older submodule state.
+identifies stock solc; a missing `txtrace` identifies a compiler without the assertion fixture.
 
 ## 2. Build Foundry against the patched revm and compilers
 
-Foundry's manifest and lockfile pin all twelve REVM crates and the foundry-core compilers
-fork (which adds the `@future` EVM version) to the current revisions. Foundry commit
-`5683db7dc79cace93363fe3465e20792b859bec9` targets revm
-`21ace0ade666d99f3e1c6e95ba173972164d0ceb` and foundry-core
-`f415f6fef0a62f44c7faa83daa8e37b14f0e009b`; all three commits are pushed and resolve from a
-clean recursive clone:
+Foundry's manifest pins all twelve REVM crates to the published commit above. Its foundry-core compiler
+dependency remains pinned at `f415f6fef0a62f44c7faa83daa8e37b14f0e009b`. From the repository root:
 
 ```bash
-cd ../foundry
+cd foundry
 cargo build --locked --bin forge --bin anvil
 # Optional release binary:
 cargo build --locked --bin forge --bin anvil --release
@@ -127,7 +115,7 @@ cd ../contracts
 ../foundry/target/release/forge test --allow-local-compiler
 ```
 
-The current project result is 304 passed, 0 failed, and 0 skipped across 17 suites. That
+The current project result is 295 passed, 0 failed, and 0 skipped across 15 suites. That
 includes the Kernel v3.3 factory/proxy migration, the same-address EIP-7702 migration, all
 three Frame account roles, both rollback paths, and sponsorship by all three example
 paymasters.
@@ -142,14 +130,11 @@ the policy layer alone.
 
 ## Why `--experimental --evm-version @future`
 
-The Frame profile, EIP-7819, EIP-7851, and EIP-8151 have no assigned compiler hard fork, so
-their compiler behavior is gated behind solc's existing experimental `@future` EVM version.
-`@future` always requires `--experimental`. Without those flags, the opcode names remain
-available as ordinary identifiers and high-level `ecrecover` remains `pure`; at `@future`,
-EIP-8151 makes it `view`. Anvil separately requires `--enable-eip7819`, `--enable-eip7851`, or
-`--enable-eip8151` and Prague-or-later rules; selecting `@future` in solc does not activate the
-node. EIP-7851's upstream opcode is still TBD, so this toolkit provisionally and
-non-normatively uses `0xf7`.
+The Frame profile and EIP-8151 use solc's experimental `@future` target.
+`@future` requires `--experimental`; high-level `ecrecover` becomes `view` there.
+Anvil separately requires `--enable-frame-transactions` and, when needed,
+`--enable-eip8151`. DFI delegation opcodes and their activation flags are removed.
+See [the current spec baseline](../spec/README.md) for PFI support boundaries.
 
 ## Optional solc tests
 

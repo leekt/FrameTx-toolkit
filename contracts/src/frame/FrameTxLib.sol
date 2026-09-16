@@ -60,7 +60,7 @@ library FrameTxLib {
         }
     }
 
-    /// @notice The scalar wire nonce under normative EIP-8141 (TXPARAM 0x01).
+    /// @notice The EIP-8141 scalar nonce or EIP-8250 nonce_seq (TXPARAM 0x01).
     function txNonce() internal view returns (uint256 v) {
         assembly ("memory-safe") {
             v := txparam(0x01)
@@ -150,6 +150,26 @@ library FrameTxLib {
         assembly ("memory-safe") {
             v := txparam(0x0C)
         }
+    }
+
+    /// @notice Pre-state sender account nonce, unchanged by keyed nonce consumption (EIP-8250).
+    function legacyNonce() internal view returns (uint256 v) {
+        assembly ("memory-safe") { v := txparam(0x0D) }
+    }
+
+    /// @notice Number of selected nonce keys (EIP-8250).
+    function nonceKeyCount() internal view returns (uint256 v) {
+        assembly ("memory-safe") { v := txparam(0x0E) }
+    }
+
+    /// @notice Hash of the length-prefixed, sorted nonce key set (EIP-8250).
+    function nonceKeysHash() internal view returns (bytes32 v) {
+        assembly ("memory-safe") { v := txparam(0x0F) }
+    }
+
+    /// @notice First selected nonce key; zero selects the legacy account nonce.
+    function firstNonceKey() internal view returns (uint256 v) {
+        assembly ("memory-safe") { v := txparam(0x10) }
     }
 
     // --------------------------------------- host-supplied recent-root fixture

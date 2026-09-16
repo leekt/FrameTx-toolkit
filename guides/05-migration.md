@@ -250,8 +250,9 @@ EIP-7702 does **not** retire the EOA's secp256k1 root. The protocol uses that ke
 the delegate, replace it, or clear it, so compromise of the original key remains decisive even
 if the delegate accepts P256 or post-quantum signatures for daily execution. True ECDSA
 retirement requires moving to a code account whose address is not governed by that EOA key,
-or a future consensus mechanism for code-controlled delegation. This toolkit's provisional
-EIP-7851 experiment is not an upstream production migration mechanism.
+or a future consensus code-adoption mechanism such as [EIP-8298](https://eips.ethereum.org/EIPS/eip-8298).
+EIP-8298 is tracked in this toolkit but has no executable opcode yet. EIP-7819/7851 support
+was removed after those proposals were declined for Hegotá.
 
 ### Tested EIP-7702 path
 
